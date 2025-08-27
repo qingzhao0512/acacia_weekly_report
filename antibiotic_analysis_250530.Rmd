@@ -6,7 +6,7 @@ output:
   html_notebook:
     toc: TRUE
     number_sections: yes
-    
+
 ---
 
 文件命名：
@@ -65,9 +65,9 @@ Firth方法不是标准GLM的一部分：Firth方法不能通过glm()函数直�
 
 
 开药数量：
-0=1921			
-1=206			
-2=16		
+0=1921
+1=206
+2=16
 共计238
 
 
@@ -122,13 +122,7 @@ packages.check <- lapply(
 # 先处理数据
 
 ```{r}
-# # 全国访问的数据
-# url_value <- "https://www.wcrcnet.cn/redcap/api/"
-# token_value <- "72020BE25F955E6D8E361C38FEFCF4D0"
-# rcon <- redcapConnection(url = url_value,token = token_value)
-# data_national_survey <- exportRecords(rcon,factors = FALSE)
-# 
-# data_national_survey$record_id <- as.character(data_national_survey$record_id)
+
 
 
 
@@ -158,22 +152,22 @@ load("data_national_survey_replaced_add_r.rda")
 
 # # 删除 record_id 以数字开头的记录
 # data_national_survey <- data_national_survey[!grepl("^[0-9]", data_national_survey$record_id), ]
-# 
-# 
-# 
+#
+#
+#
 # # 找到所有的既有不带r，又有带 _r 的记录
 # with_r <- data_national_survey[data_national_survey$record_id %in% paste0(unique(data_national_survey$record_id), "_r"), ]
-# 
-# 
+#
+#
 # # 找到所有的不带 _r 的记录。如果同时存在basic id和带_r，保留basic id
 # without_r <- data_national_survey[!data_national_survey$record_id %in% paste0(unique(data_national_survey$record_id), "_r"), ]
-# 
-# 
+#
+#
 # # 从不带 _r 的记录中删除那些有带 _r 的对应basic id
 # for (id in unique(with_r$record_id)) {
 #   without_r <- without_r[without_r$record_id != gsub("_r$", "", id), ]
 # }
-# 
+#
 # # 合并带 _r 的记录和剩余的不带 _r 的记录
 # data_national_survey_replaced_add_r <- rbind(with_r, without_r)
 
@@ -196,8 +190,8 @@ unique_id_df <- data.frame(record_id = unique(data_national_survey_replaced_add_
 # 分病例整理数据框
 
 tmp <- data_national_survey_replaced_add_r %>%
-  filter(!redcap_event_name %in% c("previsit_sp_arm_1", 
-                                  "postvisit_research_arm_1", 
+  filter(!redcap_event_name %in% c("previsit_sp_arm_1",
+                                  "postvisit_research_arm_1",
                                   "postvisit_research_arm_1b"))
 
 
@@ -244,13 +238,13 @@ data <- tmp %>%
 # case_mapping <- tibble(
 #   visit_case = as.character(c(1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12)),
 #   case_name = c("migraine", "postpartum_depression", "pediatric_diarrhea",
-#                "common_cold", "gastritis", "asthma", "angina", 
+#                "common_cold", "gastritis", "asthma", "angina",
 #                "back_pain", "stress_incontinence", "hypertension",
 #                "diabetes")
 # )
-# 
+#
 # # —— 拆分具体病例列还是有问题
-# 
+#
 # # 拆分数据并创建独立的数据框
 # tmp %>%
 #   inner_join(case_mapping, by = "visit_case") %>%  # 关联病例名
@@ -259,13 +253,13 @@ data <- tmp %>%
 #   walk(~{
 #     case_num <- unique(.x$visit_case)
 #     case_name <- unique(.x$case_name)
-#     
+#
 #     # 创建动态变量名并赋值到全局环境
-#     assign(paste0("tmp_", case_name), 
-#            as.data.frame(.x), 
+#     assign(paste0("tmp_", case_name),
+#            as.data.frame(.x),
 #            envir = .GlobalEnv)
-#     
-#     message(sprintf("已创建数据框: tmp_%s (对应visit_case=%d)", 
+#
+#     message(sprintf("已创建数据框: tmp_%s (对应visit_case=%d)",
 #                    case_name, case_num))
 #   })
 
@@ -357,50 +351,50 @@ rm(output_filename)
 
 ## 把处置所有的信息都整理出来
 ### Treatment
-data_national_survey_replaced_add_r %>% 
+data_national_survey_replaced_add_r %>%
         filter(redcap_event_name=="afterclinic_sp_arm_1") %>%
         filter(is.na(redcap_repeat_instrument)) ->t1
 
-list_file <- list() 
+list_file <- list()
 
 for (case_var in unique(data_visit_summary_2$case_name)) {
-        
-        checklist_var_first <- switch(case_var, 
+
+        checklist_var_first <- switch(case_var,
                                       "压力性尿失禁"="sui_treat1",
-                                      "偏头痛"="migraine_treat1", 
-                                      "产后抑郁"="ppd_treat1", 
-                                      "小儿腹泻"="diarrhea_treat1", 
+                                      "偏头痛"="migraine_treat1",
+                                      "产后抑郁"="ppd_treat1",
+                                      "小儿腹泻"="diarrhea_treat1",
                                       "普通感冒"="cold_treat1",
-                                      "胃炎"="cng_treat1", 
-                                      "哮喘"="asthma_treat1", 
-                                      "心绞痛"="angina_treat1",  
-                                      "腰背痛"="lbp_treat1",  
+                                      "胃炎"="cng_treat1",
+                                      "哮喘"="asthma_treat1",
+                                      "心绞痛"="angina_treat1",
+                                      "腰背痛"="lbp_treat1",
                                       "高血压"="eh_treat1",
-                                      "糖尿病"="diabetes_treat3") 
-        
-        treatment_var_final <- switch(case_var, 
-                                      "压力性尿失禁"="sui_treat14", 
-                                      "偏头痛"="migraine_treat7", 
+                                      "糖尿病"="diabetes_treat3")
+
+        treatment_var_final <- switch(case_var,
+                                      "压力性尿失禁"="sui_treat14",
+                                      "偏头痛"="migraine_treat7",
                                       "产后抑郁"="ppd_treat10",
-                                      "小儿腹泻"="diarrhea_treat11", 
-                                      "普通感冒"="cold_treat12", 
-                                      "胃炎"="cng_treat17", 
-                                      "哮喘"="asthma_treat5", 
-                                      "心绞痛"="angina_treat6",   
-                                      "腰背痛"="lbp_treat12",  
+                                      "小儿腹泻"="diarrhea_treat11",
+                                      "普通感冒"="cold_treat12",
+                                      "胃炎"="cng_treat17",
+                                      "哮喘"="asthma_treat5",
+                                      "心绞痛"="angina_treat6",
+                                      "腰背痛"="lbp_treat12",
                                       "高血压"="eh_treat18",
-                                      "糖尿病"="diabetes_treat11") 
-        
-        data_visit_summary_2 %>%  
-                filter(case_name==case_var) %>%  
-                left_join(t1,by="record_id") %>%  
+                                      "糖尿病"="diabetes_treat11")
+
+        data_visit_summary_2 %>%
+                filter(case_name==case_var) %>%
+                left_join(t1,by="record_id") %>%
                 dplyr::select(record_id,checklist_var_first:treatment_var_final) ->t_result
-        
-        current_list <- list(case_var = t_result) 
-        names(current_list) <- case_var 
-        list_file <- append(list_file,current_list) 
+
+        current_list <- list(case_var = t_result)
+        names(current_list) <- case_var
+        list_file <- append(list_file,current_list)
 }
-        
+
 
 # 生成带有当前日期的文件名
 output_filename <- paste("antibotic_treatments_by_cases-", format(Sys.time(), "%Y-%m-%d"), ".xlsx", sep = "")
@@ -434,7 +428,7 @@ data_analysis <- data %>%
 
 
 # missing_in_unique <- setdiff(data_analysis$record_id, unique_id_df$record_id)
-# 
+#
 # extra_in_unique <- setdiff(unique_id_df$record_id, data_analysis$record_id)
 
 
@@ -500,7 +494,7 @@ data_analysis <- data_analysis %>%
   mutate(
     # 从 record_id 提取省份缩写（前2或3个字母，不区分大小写）
     province_abbr = str_extract(record_id, "^[A-Za-z]{2,3}") %>% toupper(),  # 转为大写统一格式
-    
+
     # 根据省份缩写映射为中文名称
     province_name = case_when(
       province_abbr %in% c("NMG") ~ "内蒙古自治区",
@@ -538,7 +532,7 @@ data_analysis_raw <- data_analysis
 
 
 # 删除何文俊整理的最终数据，所对应的原始数据
-data_analysis <- data_analysis %>% 
+data_analysis <- data_analysis %>%
   dplyr::select(-c(migraine_q3:pppc_complete,
            accessibility1:pharmaceutical_satisfaction_complete,
            time_arrive:info_collection_complete,
@@ -555,8 +549,8 @@ missing_in_data <- setdiff(qualityresult$record_id, data_analysis$record_id)
 
 
 tmp <- qualityresult %>%
-  left_join(data_analysis, by = "record_id") %>% 
-  dplyr::select(-(prescription_confirm:drug_info_complete))  
+  left_join(data_analysis, by = "record_id") %>%
+  dplyr::select(-(prescription_confirm:drug_info_complete))
 
 
 
@@ -605,7 +599,7 @@ library(writexl)
 
 
 # 1. 读取antibiotic数据——每次更改excel，都需要把前面的all重新改一下
-antibiotic_data <- read_excel("antibotic_treatments_by_cases-2025-05-14.xlsx", 
+antibiotic_data <- read_excel("antibotic_treatments_by_cases-2025-05-14.xlsx",
                             sheet = "all") %>%
   # 关键步骤：对record_id去重（保留每个ID的第一条记录）
   distinct(record_id, .keep_all = TRUE)
@@ -616,7 +610,7 @@ new_cols <- setdiff(names(antibiotic_data), names(tmp))
 # 3. 安全合并（确保行数不变）
 final_data <- tmp %>%
   left_join(
-    antibiotic_data %>% 
+    antibiotic_data %>%
       dplyr::select(record_id, all_of(new_cols)),
     by = "record_id"
   )
@@ -635,9 +629,9 @@ final_data <- final_data %>%
       v2 <- ifelse(is.na(antibiotic_2) | antibiotic_2 == "", 0, 1)
       v1 + v2
     },
-    
+
     # 计算总价格（确保价格列为数值型）
-    price_all_antibiotic = coalesce(as.numeric(antibiotic_1_price), 0) + 
+    price_all_antibiotic = coalesce(as.numeric(antibiotic_1_price), 0) +
                           coalesce(as.numeric(antibiotic_2_price), 0)
   )
 
@@ -753,9 +747,9 @@ final_data <- final_data %>%
     ownership_type = ifelse(ownership %in% c(11, 12), "公立", "私立"),
     ownership_type = factor(ownership_type, levels = c("私立", "公立"))
   ) %>%
-  
+
   # 删除原始 ownership 变量
-  dplyr::select(-ownership) 
+  dplyr::select(-ownership)
 
 
 
@@ -773,7 +767,7 @@ final_data <- final_data %>%
       TRUE ~ NA_character_  # 其他未分类的设为 NA
     ),
     institution_type_group = factor(institution_type_group,
-                                    levels = c("医院", "社区卫生中心（站）", "乡镇卫生院", "诊所", "村卫生室")) 
+                                    levels = c("医院", "社区卫生中心（站）", "乡镇卫生院", "诊所", "村卫生室"))
   )
 
 
@@ -792,26 +786,26 @@ final_data <- final_data %>%
       TRUE ~ NA_character_  # 其他未分类的设为 NA
     ),
     institution_type_houyu = factor(institution_type_houyu,
-                                    levels = c("医院", "社区卫生服务中心", "社区卫生服务站", "乡镇卫生院", "诊所", "村卫生室")) 
+                                    levels = c("医院", "社区卫生服务中心", "社区卫生服务站", "乡镇卫生院", "诊所", "村卫生室"))
   )
 
 
-## 创建 rural_type 二元分类  
+## 创建 rural_type 二元分类
 final_data <- final_data %>%
   mutate(
     rural_type = case_when(
       institution_type %in% c("C210", "C220", "D600") ~ "rural",
       institution_type %in% c(
-        "A100", "A210", "A300", 
-        "B100", "B200", 
-        "D110", "D121", "D122", "D130", 
+        "A100", "A210", "A300",
+        "B100", "B200",
+        "D110", "D121", "D122", "D130",
         "D211", "D212", "D213", "D229"
       ) ~ "urban",
       TRUE ~ NA_character_
     ),
     rural_type = factor(rural_type, levels = c("urban", "rural"))
   )  %>%
-  dplyr::select(-institution_type) 
+  dplyr::select(-institution_type)
 
 
 
@@ -821,7 +815,7 @@ final_data <- final_data %>%
   mutate(
     tm = factor(tm,
     levels = c(0, 1),
-  labels = c("无中药或中成药", "有中药或中成药")) 
+  labels = c("无中药或中成药", "有中药或中成药"))
   )
 
 
@@ -829,11 +823,11 @@ final_data <- final_data %>%
 
 # 数值型变量列表（中文）
 numeric_vars_cn <- c(
-  "推荐问诊中实际问诊的比例", 
-  "推荐体格检查中实际执行的比例", 
-  "推荐实验室或影像检查中实际建议的比例", 
-  "问诊费", "检查费", "处置费", "其他费用", 
-  "药费", "总费用", 
+  "推荐问诊中实际问诊的比例",
+  "推荐体格检查中实际执行的比例",
+  "推荐实验室或影像检查中实际建议的比例",
+  "问诊费", "检查费", "处置费", "其他费用",
+  "药费", "总费用",
   "等待时间", "诊室时间", "总时间", "PPPC"
 )
 
@@ -851,8 +845,8 @@ final_data$doctor_ethnic[final_data$doctor_ethnic == 9] <- NA
 table(final_data$management_type)
 
 
-result <- subset(final_data, 
-                 management_type == 9, 
+result <- subset(final_data,
+                 management_type == 9,
                  select = record_id)
 print(result)
 
@@ -908,8 +902,8 @@ final_data$`总费用`[final_data$`总费用` == 0] <- NA
 
 `record_id`
 
-391	gd_visit_524	 ——东平镇东方红卫生站	           ——应该是1，非营利性	
-1845	sc_visit_2160	 ——大竹县欧家乡普山村卫生站        ——应该是1，非营利性		
+391	gd_visit_524	 ——东平镇东方红卫生站	           ——应该是1，非营利性
+1845	sc_visit_2160	 ——大竹县欧家乡普山村卫生站        ——应该是1，非营利性
 2024	sx_visit_1504    ——西安市临潼区凤凰社区卫生服务中心——应该是1，非营利性
 
 
@@ -930,34 +924,34 @@ formal_data <- final_data %>%
   dplyr::select(
     # 序号
     record_id,
-          
+
     # 因变量
     antibiotic_prescribed_num = prescribe_all_antibiotic,  # 重命名为更清晰的变量名
     antibiotic_prescribed = prescribe_any_antibiotic,
-    
+
     # 是否开中药/中成药
     tm,
-    
-    
+
+
     # 地区和病例特征
     province = province_name,
     case_type = case_name,
-    
+
     # 医疗质量相关变量
     diagnosis_quality = 诊断质量,
     history_taking_ratio = `推荐问诊中实际问诊的比例`,  # 避免使用中文变量名
     physical_exam_ratio = `推荐体格检查中实际执行的比例`,
     lab_imaging_ratio = `推荐实验室或影像检查中实际建议的比例`,
     PPPC,
-    
+
     # 医生特征
     doctor_title,
     doctor_age,
-    doctor_ethnic,  
+    doctor_ethnic,
     doctor_education,
     doctor_certificate,
-    doctor_female,  
-    
+    doctor_female,
+
     # 机构特征
     ownership_type,
     rural_type,
@@ -969,13 +963,13 @@ formal_data <- final_data %>%
     member_corporate,
     member_alliance,
     ins_contractor,
-    
+
     # 费用相关
     consultation_fee = `问诊费`,
     examination_fee = `检查费`,
     treatment_fee = `处置费`,
     total_fee = `总费用`,
-    
+
     # 时间相关
     waiting_time = `等待时间`,
     consultation_time = `诊室时间`,
@@ -1043,9 +1037,9 @@ total_fee：总体费用
 # 剔除缺失值多的数据
 
 ## 删除缺失率超过60%的变量
-vars_to_remove <- c("treatment_fee", "examination_fee", "doctor_education", 
-  "member_alliance", "member_corporate", 
-  "univ_affiliation", "ins_contractor", "consultation_fee", "doctor_certificate", 
+vars_to_remove <- c("treatment_fee", "examination_fee", "doctor_education",
+  "member_alliance", "member_corporate",
+  "univ_affiliation", "ins_contractor", "consultation_fee", "doctor_certificate",
   "hospital_class", "hospital_level", "doctor_title", "total_fee"
 )
 formal_data_clean <- formal_data[, !(names(formal_data) %in% vars_to_remove)]
@@ -1333,7 +1327,7 @@ colSums(is.na(formal_data_final_modeimputed))
 ```
 
 
- 
+
 
 
 
@@ -1386,16 +1380,16 @@ all_vars <- c(
 get_univ_results <- function(var) {
   formula_uni <- as.formula(paste("antibiotic_prescribed ~", var))
   model <- glm(formula_uni, data = formal_data_final_modeimputed, family = binomial)
-  
+
   tidy_result <- broom::tidy(model, conf.int = TRUE, exponentiate = TRUE)
   tidy_result$variable <- var
-  
+
   # 提取整体P值
   overall_p <- tryCatch({
     p_val <- car::Anova(model, type = "II")$`Pr(>Chisq)`[1]
     p_val
   }, error = function(e) NA)
-  
+
   tidy_result$overall_p <- overall_p
   return(tidy_result)
 }
@@ -1489,7 +1483,7 @@ case_type各分类的OR值异常高（如普通感冒的OR=2.8亿）,当某些�
 6. case_type压力性尿失禁
 7. rural_typerural
 8. consultation_time
-9. diagnosis_quality部分正确	
+9. diagnosis_quality部分正确
 
 
 
@@ -1527,7 +1521,7 @@ table(formal_data_final_modeimputed$case_type, formal_data_final_modeimputed$ant
 # ### 变量1：中药、删除营利非营利、赵厚宇推荐的机构分类
 # # 拟合 Firth 校正 logistic 回归模型
 # firth_model <- logistf(
-#   antibiotic_prescribed ~ 
+#   antibiotic_prescribed ~
 #     tm +
 #     case_type +
 #     consultation_time +
@@ -1548,10 +1542,10 @@ table(formal_data_final_modeimputed$case_type, formal_data_final_modeimputed$ant
 #   data = formal_data_final_modeimputed
 # )
 
-# 
+#
 # ### 变量2：发现赵厚宇老师建议的结果，跑出来之后主体研究和敏感性分析结果相差很大。最终去除tm，加上机构分类，去除营利和非营利
 # firth_model <- logistf(
-#   antibiotic_prescribed ~ 
+#   antibiotic_prescribed ~
 #     case_type +
 #     consultation_time +
 #     diagnosis_quality +
@@ -1575,7 +1569,7 @@ table(formal_data_final_modeimputed$case_type, formal_data_final_modeimputed$ant
 
 ### 变量3：发现变量2跑出来之后主体研究和敏感性分析结果相差很大。最终去除tm，去除机构分类，去除营利和非营利
 firth_model <- logistf(
-  antibiotic_prescribed ~ 
+  antibiotic_prescribed ~
     case_type +
     consultation_time +
     diagnosis_quality +
@@ -1688,12 +1682,12 @@ lab_imaging_ratio：OR = 0.39，p = 0.0069
 👉 解释：检查率越高，越不容易开抗生素，可能因为诊断更明确了。
 
 
-1. case_type普通感冒	
-1. case_type胃炎	
-1. case_type哮喘	
+1. case_type普通感冒
+1. case_type胃炎
+1. case_type哮喘
 1. lab_imaging_ratio
 1. diagnosis_quality错误
-1. case_type产后抑郁	
+1. case_type产后抑郁
 1. rural_typerural
 1. case_type压力性尿失禁
 1. consultation_time
@@ -1721,7 +1715,7 @@ outcome_var <- "antibiotic_prescribed_num"
 # 所有自变量
 all_vars <- c("tm", "province", "case_type", "diagnosis_quality",
               "history_taking_ratio", "physical_exam_ratio", "lab_imaging_ratio",
-              "doctor_age", "doctor_ethnic", "doctor_female", 
+              "doctor_age", "doctor_ethnic", "doctor_female",
               "ownership_type", "rural_type", "management_type", "institution_type_houyu",
               "waiting_time", "consultation_time", "total_time",
               "sp_gender", "sp_age_group", "PPPC")
@@ -1743,11 +1737,11 @@ univ_results <- lapply(all_vars, function(var) {
     error = function(e) return(NULL)
   )
   if (is.null(model)) return(NULL)
-  
+
   coefs <- summary(model)$coefficients
   ci <- tryCatch(confint(model), error = function(e) return(NULL))
   if (is.null(ci)) return(NULL)
-  
+
   # 排除截距
   terms <- rownames(coefs)[-1]
   data.frame(
@@ -1819,7 +1813,7 @@ outcome_var <- "antibiotic_prescribed"
 # 最终变量列表（含强制纳入 + p<0.2）
 final_vars <- c("tm", "province", "case_type", "diagnosis_quality",
               "history_taking_ratio", "physical_exam_ratio", "lab_imaging_ratio",
-              "doctor_age", "doctor_ethnic", "doctor_female", 
+              "doctor_age", "doctor_ethnic", "doctor_female",
               "ownership_type", "rural_type", "institution_type_houyu",
               "consultation_time", "total_time",
               "sp_gender", "sp_age_group"
@@ -1870,7 +1864,7 @@ print(multi_model)
 
 
 
-AIC(multi_model)   
+AIC(multi_model)
 BIC(multi_model)
 
 
@@ -1900,7 +1894,7 @@ outcome_var <- "antibiotic_prescribed_num"
 # 所有自变量
 all_vars <- c("tm", "province", "case_type", "diagnosis_quality",
               "history_taking_ratio", "physical_exam_ratio", "lab_imaging_ratio",
-              "doctor_age", "doctor_ethnic", "doctor_female", 
+              "doctor_age", "doctor_ethnic", "doctor_female",
               "ownership_type", "rural_type", "management_type", "institution_type_houyu",
               "waiting_time", "consultation_time", "total_time",
               "sp_gender", "sp_age_group", "PPPC")
@@ -1930,11 +1924,11 @@ univ_results <- lapply(all_vars, function(var) {
     error = function(e) return(NULL)
   )
   if (is.null(model)) return(NULL)
-  
+
   coefs <- summary(model)$coefficients
   ci <- tryCatch(confint(model), error = function(e) return(NULL))
   if (is.null(ci)) return(NULL)
-  
+
   # 排除截距
   terms <- rownames(coefs)[-1]
   data.frame(
@@ -2009,7 +2003,7 @@ outcome_var <- "antibiotic_prescribed"
 # # 最终变量列表（含强制纳入 + p<0.2）
 # final_vars <- c("tm", "province", "case_type", "diagnosis_quality",
 #               "history_taking_ratio", "physical_exam_ratio", "lab_imaging_ratio",
-#               "doctor_age", "doctor_ethnic", "doctor_female", 
+#               "doctor_age", "doctor_ethnic", "doctor_female",
 #               "ownership_type", "rural_type", "institution_type_houyu",
 #               "consultation_time", "total_time",
 #               "sp_gender", "sp_age_group"
@@ -2021,7 +2015,7 @@ outcome_var <- "antibiotic_prescribed"
 # # 最终变量列表（含强制纳入 + p<0.2）
 # final_vars <- c("province", "case_type", "diagnosis_quality",
 #               "history_taking_ratio", "physical_exam_ratio", "lab_imaging_ratio",
-#               "doctor_age", "doctor_ethnic", "doctor_female", 
+#               "doctor_age", "doctor_ethnic", "doctor_female",
 #               "ownership_type", "rural_type", "institution_type_houyu",
 #               "consultation_time", "total_time",
 #               "sp_gender", "sp_age_group"
@@ -2031,8 +2025,8 @@ outcome_var <- "antibiotic_prescribed"
 ### 发现赵厚宇老师建议的结果，跑出来之后主体研究和敏感性分析结果相差很大。最终去除tm，去除机构分类，去除营利和非营利
 final_vars <- c("province", "case_type", "diagnosis_quality",
               "history_taking_ratio", "physical_exam_ratio", "lab_imaging_ratio",
-              "doctor_age", "doctor_ethnic", "doctor_female", 
-              "ownership_type", "rural_type", 
+              "doctor_age", "doctor_ethnic", "doctor_female",
+              "ownership_type", "rural_type",
               "consultation_time", "total_time",
               "sp_gender", "sp_age_group"
 )
@@ -2096,7 +2090,7 @@ print(multi_model)
 
 
 
-AIC(multi_model)   
+AIC(multi_model)
 BIC(multi_model)
 
 
@@ -2184,13 +2178,13 @@ or_ci <- lapply(all_vars, function(var) {
   formula_uni <- as.formula(paste("antibiotic_prescribed ~", var))
   model <- glm(formula_uni, data = formal_data_final_modeimputed, family = binomial)
   coefs <- coef(summary(model))
-  
+
   # 提取全部非截距项的OR和CI
   ci <- suppressMessages(confint(model))
   OR <- exp(coef(model))
   lower <- exp(ci[,1])
   upper <- exp(ci[,2])
-  
+
   # 组织为数据框
   df <- data.frame(
     Variable = var,
@@ -2238,7 +2232,7 @@ options(scipen = 999)
 
 # 拟合多变量 logistic 回归模型
 final_or <- glm(
-  antibiotic_prescribed ~ 
+  antibiotic_prescribed ~
     case_type +
     physical_exam_ratio +
     lab_imaging_ratio +
@@ -2382,7 +2376,7 @@ rm(output_filename)
 
 print_mediation_summary <- function(med.out, digits = 6) {
   cat("===== Causal Mediation Analysis Summary =====\n\n")
-  
+
   extract_row <- function(name, est, ci, p) {
     est_str <- format(est, digits = digits, nsmall = digits)
     ci_str  <- paste0("[", format(ci[1], digits = digits, nsmall = digits),
@@ -2519,7 +2513,7 @@ write.csv(mediation, "mediation_data.csv", row.names = FALSE)
 
 
 # 定义协变量名称（用于重复插入）
-covariates <- "case_type + doctor_female + management_type + ownership_type + 
+covariates <- "case_type + doctor_female + management_type + ownership_type +
                province + rural_type + sp_gender + sp_age_group + doctor_age + doctor_ethnic"
 
 # 构建带协变量的多重中介模型
@@ -2715,15 +2709,15 @@ print(cont_one_value)
 
 
 firth_model <- logistf(
-  antibiotic_prescribed ~ physical_exam_ratio + sp_gender + sp_age + 
-    consultation_fee + ownership_type +  
-    diagnosis_quality + history_taking_ratio + rural_type + total_time + 
-    consultation_time + management_type + examination_fee + 
+  antibiotic_prescribed ~ physical_exam_ratio + sp_gender + sp_age +
+    consultation_fee + ownership_type +
+    diagnosis_quality + history_taking_ratio + rural_type + total_time +
+    consultation_time + management_type + examination_fee +
     province + case_type+doctor_female+doctor_age,
   data = migraine_data
 )
 
-all_vars <- c("province", "case_type", "diagnosis_quality", "history_taking_ratio", "physical_exam_ratio", "lab_imaging_ratio", "doctor_age","doctor_ethnic", "doctor_female", 
+all_vars <- c("province", "case_type", "diagnosis_quality", "history_taking_ratio", "physical_exam_ratio", "lab_imaging_ratio", "doctor_age","doctor_ethnic", "doctor_female",
               "ownership_type", "rural_type", "management_type",
               "consultation_fee", "examination_fee", "treatment_fee",
               "total_fee", "waiting_time", "consultation_time",
@@ -2747,7 +2741,7 @@ migraine_data <- formal_data_final_modeimputed %>%
 options(scipen = 999)
 
 # 记录所有变量名称
-all_vars <- c("province", "diagnosis_quality", "history_taking_ratio", "physical_exam_ratio", "lab_imaging_ratio", "doctor_age","doctor_ethnic", "doctor_female", 
+all_vars <- c("province", "diagnosis_quality", "history_taking_ratio", "physical_exam_ratio", "lab_imaging_ratio", "doctor_age","doctor_ethnic", "doctor_female",
               "ownership_type", "rural_type", "management_type",
               "waiting_time", "consultation_time",
               "total_time", "sp_gender","sp_age")
@@ -2776,11 +2770,11 @@ print(univ_table)
 ```
 
 小儿腹泻：P＜0.2
-consultation_time	0.0044			
-total_time	0.0239			
-history_taking_ratio	0.0344			
-physical_exam_ratio	0.0602			
-management_type	0.1188			
+consultation_time	0.0044
+total_time	0.0239
+history_taking_ratio	0.0344
+physical_exam_ratio	0.0602
+management_type	0.1188
 sp_gender	0.1533
 
 
@@ -2792,8 +2786,8 @@ sp_gender	0.1533
 
 # 拟合 Firth 惩罚逻辑回归模型
 firth_model <- logistf(
-  formula = antibiotic_prescribed ~ consultation_time + total_time + 
-    history_taking_ratio + physical_exam_ratio + management_type + 
+  formula = antibiotic_prescribed ~ consultation_time + total_time +
+    history_taking_ratio + physical_exam_ratio + management_type +
     doctor_female + doctor_age + doctor_ethnic + sp_gender + sp_age,
   data = migraine_data
 )
@@ -2858,7 +2852,7 @@ migraine_data <- formal_data_final_modeimputed %>%
 options(scipen = 999)
 
 # 记录所有变量名称
-all_vars <- c("province", "diagnosis_quality", "history_taking_ratio", "physical_exam_ratio", "lab_imaging_ratio", "doctor_age","doctor_ethnic", "doctor_female", 
+all_vars <- c("province", "diagnosis_quality", "history_taking_ratio", "physical_exam_ratio", "lab_imaging_ratio", "doctor_age","doctor_ethnic", "doctor_female",
               "ownership_type", "rural_type", "management_type",
               "waiting_time", "consultation_time",
               "total_time", "sp_gender","sp_age")
@@ -2891,11 +2885,11 @@ table(migraine_data$treatment_fee)
 ```
 
 普通感冒：P＜0.2
-management_type	0.0075			
-ownership_type	0.0454			
-consultation_time	0.0572			
-lab_imaging_ratio	0.0581			
-diagnosis_quality	0.0940			
+management_type	0.0075
+ownership_type	0.0454
+consultation_time	0.0572
+lab_imaging_ratio	0.0581
+diagnosis_quality	0.0940
 
 
 
@@ -2977,7 +2971,7 @@ migraine_data <- formal_data_final_modeimputed %>%
 options(scipen = 999)
 
 # 记录所有变量名称
-all_vars <- c("province", "diagnosis_quality", "history_taking_ratio", "physical_exam_ratio", "lab_imaging_ratio", "doctor_age","doctor_ethnic", "doctor_female", 
+all_vars <- c("province", "diagnosis_quality", "history_taking_ratio", "physical_exam_ratio", "lab_imaging_ratio", "doctor_age","doctor_ethnic", "doctor_female",
               "ownership_type", "rural_type", "management_type","waiting_time", "consultation_time",
               "total_time", "sp_gender","sp_age")
 
@@ -3005,10 +2999,10 @@ print(univ_table)
 ```
 
 胃炎：P＜0.2
-sp_age	0.0052			
-sp_gender	0.0101			
-ownership_type	0.0374			
-rural_type	0.0491			
+sp_age	0.0052
+sp_gender	0.0101
+ownership_type	0.0374
+rural_type	0.0491
 lab_imaging_ratio	0.1464
 
 
@@ -3082,7 +3076,7 @@ migraine_data <- formal_data_final_modeimputed %>%
 options(scipen = 999)
 
 # 记录所有变量名称
-all_vars <- c("province", "diagnosis_quality", "history_taking_ratio", "physical_exam_ratio", "lab_imaging_ratio", "doctor_age","doctor_ethnic", "doctor_female", 
+all_vars <- c("province", "diagnosis_quality", "history_taking_ratio", "physical_exam_ratio", "lab_imaging_ratio", "doctor_age","doctor_ethnic", "doctor_female",
               "ownership_type", "rural_type", "management_type","waiting_time", "consultation_time",
               "total_time", "sp_age")
 
@@ -3110,10 +3104,10 @@ print(univ_table)
 ```
 
 哮喘：P＜0.2
-lab_imaging_ratio	0.0091			
-consultation_time	0.0136			
-rural_type	0.0530			
-waiting_time	0.0836			
+lab_imaging_ratio	0.0091
+consultation_time	0.0136
+rural_type	0.0530
+waiting_time	0.0836
 ownership_type	0.1711
 
 
@@ -3190,7 +3184,7 @@ migraine_data <- formal_data_final_modeimputed %>%
 options(scipen = 999)
 
 # 记录所有变量名称
-all_vars <- c("province", "diagnosis_quality", "history_taking_ratio", "physical_exam_ratio", "lab_imaging_ratio", "doctor_age","doctor_ethnic", "doctor_female", 
+all_vars <- c("province", "diagnosis_quality", "history_taking_ratio", "physical_exam_ratio", "lab_imaging_ratio", "doctor_age","doctor_ethnic", "doctor_female",
               "ownership_type", "rural_type", "management_type","waiting_time", "consultation_time",
               "total_time", "sp_age")
 
@@ -3218,7 +3212,7 @@ print(univ_table)
 ```
 
 心绞痛：P＜0.2
-total_time	0.0198			
+total_time	0.0198
 waiting_time	0.1194
 
 
@@ -3293,7 +3287,7 @@ migraine_data <- formal_data_final_modeimputed %>%
 options(scipen = 999)
 
 # 记录所有变量名称
-all_vars <- c("province", "diagnosis_quality", "history_taking_ratio", "physical_exam_ratio", "doctor_age","doctor_ethnic", "doctor_female", 
+all_vars <- c("province", "diagnosis_quality", "history_taking_ratio", "physical_exam_ratio", "doctor_age","doctor_ethnic", "doctor_female",
               "ownership_type", "rural_type", "management_type","waiting_time", "consultation_time",
               "total_time", "sp_age")
 
@@ -3321,9 +3315,9 @@ print(univ_table)
 ```
 
 腰背痛：P＜0.2
-management_type	0.0042			
-ownership_type	0.0609			
-history_taking_ratio	0.1425	
+management_type	0.0042
+ownership_type	0.0609
+history_taking_ratio	0.1425
 
 
 1. doctor_female
@@ -3409,7 +3403,7 @@ migraine_data <- formal_data_final_modeimputed %>%
 options(scipen = 999)
 
 # 记录所有变量名称
-all_vars <- c("province", "diagnosis_quality", "history_taking_ratio", "physical_exam_ratio", "lab_imaging_ratio", "doctor_age","doctor_ethnic", "doctor_female", 
+all_vars <- c("province", "diagnosis_quality", "history_taking_ratio", "physical_exam_ratio", "lab_imaging_ratio", "doctor_age","doctor_ethnic", "doctor_female",
               "ownership_type", "rural_type", "management_type","waiting_time", "consultation_time",
               "total_time", "sp_age")
 
@@ -3483,7 +3477,7 @@ migraine_data <- formal_data_final_modeimputed %>%
 options(scipen = 999)
 
 # 记录所有变量名称
-all_vars <- c("province", "diagnosis_quality", "history_taking_ratio", "physical_exam_ratio", "lab_imaging_ratio", "doctor_age","doctor_ethnic", "doctor_female", 
+all_vars <- c("province", "diagnosis_quality", "history_taking_ratio", "physical_exam_ratio", "lab_imaging_ratio", "doctor_age","doctor_ethnic", "doctor_female",
               "ownership_type", "rural_type", "management_type","waiting_time", "consultation_time",
               "total_time", "sp_gender","sp_age")
 
@@ -3511,8 +3505,8 @@ print(univ_table)
 ```
 
 高血压：P＜0.2
-diagnosis_quality	0.1420			
-sp_age	0.1716	
+diagnosis_quality	0.1420
+sp_age	0.1716
 
 
 
@@ -3588,7 +3582,7 @@ migraine_data <- formal_data_final_modeimputed %>%
 options(scipen = 999)
 
 # 记录所有变量名称
-all_vars <- c("province", "diagnosis_quality", "history_taking_ratio", "physical_exam_ratio", "lab_imaging_ratio", "doctor_age","doctor_ethnic", "doctor_female", 
+all_vars <- c("province", "diagnosis_quality", "history_taking_ratio", "physical_exam_ratio", "lab_imaging_ratio", "doctor_age","doctor_ethnic", "doctor_female",
               "ownership_type", "rural_type", "management_type","waiting_time", "consultation_time",
               "total_time", "sp_gender","sp_age")
 
@@ -3616,7 +3610,7 @@ print(univ_table)
 ```
 
 糖尿病：P＜0.2
-sp_age	
+sp_age
 
 
 
@@ -3725,7 +3719,7 @@ migraine_data <- formal_data_final_modeimputed %>%
 options(scipen = 999)
 
 # 记录所有变量名称
-all_vars <- c("province", "diagnosis_quality", "history_taking_ratio", "physical_exam_ratio", "lab_imaging_ratio", "doctor_age","doctor_ethnic", "doctor_female", 
+all_vars <- c("province", "diagnosis_quality", "history_taking_ratio", "physical_exam_ratio", "lab_imaging_ratio", "doctor_age","doctor_ethnic", "doctor_female",
               "ownership_type", "rural_type", "management_type",
               "consultation_fee", "total_fee", "waiting_time", "consultation_time",
               "total_time", "sp_gender","sp_age")
@@ -3754,12 +3748,12 @@ print(univ_table)
 ```
 
 小儿腹泻：P＜0.2
-consultation_time	0.0044			
-total_fee	0.0048			
-total_time	0.0239			
-history_taking_ratio	0.0344			
-physical_exam_ratio	0.0602			
-management_type	0.1188			
+consultation_time	0.0044
+total_fee	0.0048
+total_time	0.0239
+history_taking_ratio	0.0344
+physical_exam_ratio	0.0602
+management_type	0.1188
 sp_gender	0.1533
 
 
@@ -4205,11 +4199,11 @@ header_summary <- bind_rows(total_summary, visit_summary)
 # 主循环：每个特征变量
 for (group_label in names(group_vars)) {
   var <- group_vars[[group_label]]
-  
+
   chisq_result <- tryCatch({
     tbl <- table(prescription_rate_data[[var]], prescription_rate_data$antibiotic_prescribed)
     expected <- suppressWarnings(chisq.test(tbl)$expected)
-    
+
     if (all(expected >= 1) && mean(expected >= 5) >= 0.8) {
       test <- chisq.test(tbl)
       list(p = test$p.value, method = "Chi-squared", statistic = round(as.numeric(test$statistic), 2))
@@ -4733,26 +4727,26 @@ generate_AWaRe_table(prescription_rate_data, unique(prescription_rate_data$case_
 # library(dplyr)
 # library(tidyr)
 # library(scales)
-# 
+#
 # # 原始数据
 # data <- data.frame(
-#   case_type_cn = c("偏头痛", "压力性尿失禁", "哮喘", "小儿腹泻", "心绞痛", "普通感冒", 
+#   case_type_cn = c("偏头痛", "压力性尿失禁", "哮喘", "小儿腹泻", "心绞痛", "普通感冒",
 #                    "糖尿病", "胃炎", "腰背痛", "高血压"),
 #   Access = c(5, 6, 19, 6, 8, 48, 1, 27, 5, 6),
 #   Watch = c(4, 9, 25, 0, 1, 46, 4, 6, 3, 4)
 # )
-# 
+#
 # case_type_en <- c("Migraine", "Stress Urinary Incontinence", "Asthma", "Pediatric Diarrhea",
 #                   "Angina", "Common Cold", "Diabetes", "Gastritis", "Low Back Pain", "Hypertension")
 # data$case_type <- factor(case_type_en, levels = rev(case_type_en))
-# 
+#
 # data <- data %>%
 #   mutate(
 #     Total = Access + Watch,
 #     Access_pct = Access / Total,
 #     Watch_pct = Watch / Total
 #   )
-# 
+#
 # plot_data <- data %>%
 #   dplyr::select(case_type, Access, Watch, Access_pct, Watch_pct) %>%
 #   pivot_longer(cols = c(Access, Watch),
@@ -4761,7 +4755,7 @@ generate_AWaRe_table(prescription_rate_data, unique(prescription_rate_data$case_
 #     Percent = ifelse(Category == "Access", Access_pct, Watch_pct),
 #     label = ifelse(Percent > 0, paste0(round(Percent * 100, 1), "%"), "")
 #   )
-# 
+#
 # # 注意这里调整顺序，先Watch后Access
 # plot_data <- plot_data %>%
 #   group_by(case_type) %>%
@@ -4772,10 +4766,10 @@ generate_AWaRe_table(prescription_rate_data, unique(prescription_rate_data$case_
 #     label_pos = xmin + Percent / 2
 #   ) %>%
 #   ungroup()
-# 
+#
 # # 颜色，顺序对应
 # custom_colors <- c("Watch" = "#024B7A", "Access" = "#FFAE49")
-# 
+#
 # p <- ggplot(plot_data, aes(x = Percent, y = case_type, fill = Category)) +
 #   geom_bar(stat = "identity", position = "stack") +
 #   geom_text(aes(x = label_pos, label = label), color = "white", size = 4.2) +
@@ -4789,7 +4783,7 @@ generate_AWaRe_table(prescription_rate_data, unique(prescription_rate_data$case_
 #   ) +
 #   theme_minimal(base_size = 14) +
 #   theme(legend.position = "bottom")
-# 
+#
 # ggsave(
 #   plot = p,
 #   filename = "antibiotic_distribution.pdf",
@@ -4809,7 +4803,7 @@ library(scales)
 
 # 原始数据
 data <- data.frame(
-  case_type_cn = c("偏头痛", "压力性尿失禁", "哮喘", "小儿腹泻", "心绞痛", "普通感冒", 
+  case_type_cn = c("偏头痛", "压力性尿失禁", "哮喘", "小儿腹泻", "心绞痛", "普通感冒",
                    "糖尿病", "胃炎", "腰背痛", "高血压"),
   Access = c(5, 6, 19, 6, 8, 48, 1, 27, 5, 6),
   Watch = c(4, 9, 25, 0, 1, 46, 4, 6, 3, 4)
@@ -5461,7 +5455,7 @@ print(table_satisfaction_wide)
 
 
 # 徐老师建议文章
-## 抗生素是否是唯一的药，还是有其他联用的药 
+## 抗生素是否是唯一的药，还是有其他联用的药
 文档见 `output_by_case_type.xlsx`
 
 ```{r}
@@ -5477,22 +5471,22 @@ sheet_names <- excel_sheets(file_path)
 process_sheet <- function(sheet_name) {
   # 读取单个sheet
   df <- read_excel(file_path, sheet = sheet_name)
-  
+
   # 标准化列名
   names(df) <- tolower(trimws(names(df)))
-  
+
   # 检查必须列
   required_cols <- c("record_id", "drug_total_fee", "common_name")
   missing_cols <- setdiff(required_cols, names(df))
   if (length(missing_cols) > 0) {
     stop(paste("Sheet", sheet_name, "缺少列:", paste(missing_cols, collapse = ", ")))
   }
-  
+
   # 只保留目标列，转换 drug_total_fee 为数值型（若转换失败则为NA）
   df <- df %>%
     dplyr::select(record_id, drug_total_fee, common_name) %>%
     mutate(drug_total_fee = as.numeric(drug_total_fee))
-  
+
   # 费用聚合：每个record_id取第一个非NA的drug_total_fee，如果全NA则为NA
   fee_data <- df %>%
     group_by(record_id) %>%
@@ -5500,25 +5494,25 @@ process_sheet <- function(sheet_name) {
       drug_total_fee = if (all(is.na(drug_total_fee))) NA_real_ else first(na.omit(drug_total_fee)),
       .groups = "drop"
     )
-  
+
   # 药品顺序编号（仅对非NA common_name）
   drug_data <- df %>%
     group_by(record_id) %>%
     mutate(drug_order = ifelse(!is.na(common_name), paste0("drug", row_number()), NA_character_)) %>%
     ungroup()
-  
+
   # 宽格式转换，药品列
   drug_wide <- drug_data %>%
     filter(!is.na(drug_order)) %>%
     dplyr::select(record_id, drug_order, common_name) %>%
     pivot_wider(names_from = drug_order, values_from = common_name)
-  
+
   # 合并费用和药品宽表，并增加case_type列
   full_data <- fee_data %>%
     left_join(drug_wide, by = "record_id") %>%
     mutate(case_type = sheet_name) %>%
     dplyr::select(record_id, drug_total_fee, case_type, everything())
-  
+
   return(full_data)
 }
 
@@ -5930,8 +5924,8 @@ mediation_clean <- mediation_data %>%
   # 创建干净版的 diagnosis_quality 变量
   mutate(
     diagnosis_quality_clean = ifelse(
-      diagnosis_quality == "没有下诊断", 
-      NA, 
+      diagnosis_quality == "没有下诊断",
+      NA,
       diagnosis_quality
     ),
     diagnosis_quality = factor(
@@ -6141,46 +6135,46 @@ province_dummies <- c(
 
 
 multipleMediation <- '
-  antibiotic_prescribed ~ 
+  antibiotic_prescribed ~
       case_type_偏头痛 + case_type_压力性尿失禁 + case_type_哮喘 + case_type_小儿腹泻 + case_type_心绞痛 +
       case_type_普通感冒 + case_type_糖尿病 + case_type_胃炎 + case_type_腰背痛 + case_type_高血压 +
       province_Guangdong + province_Guizhou + province_Hunan + province_InnerMongolia + province_Shaanx + province_Sichuan +
-      doctor_female + management_type + ownership_type + rural_type + sp_gender + 
-      `sp_age_group_30-49` + `sp_age_group_≥50` + 
-      `doctor_age_30-50` + `doctor_age_≥50` + 
+      doctor_female + management_type + ownership_type + rural_type + sp_gender +
+      `sp_age_group_30-49` + `sp_age_group_≥50` +
+      `doctor_age_30-50` + `doctor_age_≥50` +
       doctor_ethnic +
-      b1*history_taking_ratio + 
-      b2a*diagnosis_quality_clean_部分正确 + 
-      b2b*diagnosis_quality_clean_错误 + 
+      b1*history_taking_ratio +
+      b2a*diagnosis_quality_clean_部分正确 +
+      b2b*diagnosis_quality_clean_错误 +
       c1*consultation_time
 
-  history_taking_ratio ~ 
+  history_taking_ratio ~
       case_type_偏头痛 + case_type_压力性尿失禁 + case_type_哮喘 + case_type_小儿腹泻 + case_type_心绞痛 +
       case_type_普通感冒 + case_type_糖尿病 + case_type_胃炎 + case_type_腰背痛 + case_type_高血压 +
       province_Guangdong + province_Guizhou + province_Hunan + province_InnerMongolia + province_Shaanx + province_Sichuan +
-      doctor_female + management_type + ownership_type + rural_type + sp_gender + 
-      `sp_age_group_30-49` + `sp_age_group_≥50` + 
-      `doctor_age_30-50` + `doctor_age_≥50` + 
+      doctor_female + management_type + ownership_type + rural_type + sp_gender +
+      `sp_age_group_30-49` + `sp_age_group_≥50` +
+      `doctor_age_30-50` + `doctor_age_≥50` +
       doctor_ethnic +
       a1*consultation_time
 
-  diagnosis_quality_clean_部分正确 ~ 
+  diagnosis_quality_clean_部分正确 ~
       case_type_偏头痛 + case_type_压力性尿失禁 + case_type_哮喘 + case_type_小儿腹泻 + case_type_心绞痛 +
       case_type_普通感冒 + case_type_糖尿病 + case_type_胃炎 + case_type_腰背痛 + case_type_高血压 +
       province_Guangdong + province_Guizhou + province_Hunan + province_InnerMongolia + province_Shaanx + province_Sichuan +
-      doctor_female + management_type + ownership_type + rural_type + sp_gender + 
-      `sp_age_group_30-49` + `sp_age_group_≥50` + 
-      `doctor_age_30-50` + `doctor_age_≥50` + 
+      doctor_female + management_type + ownership_type + rural_type + sp_gender +
+      `sp_age_group_30-49` + `sp_age_group_≥50` +
+      `doctor_age_30-50` + `doctor_age_≥50` +
       doctor_ethnic +
       a2a*consultation_time + d1a*history_taking_ratio
 
-  diagnosis_quality_clean_错误 ~ 
+  diagnosis_quality_clean_错误 ~
       case_type_偏头痛 + case_type_压力性尿失禁 + case_type_哮喘 + case_type_小儿腹泻 + case_type_心绞痛 +
       case_type_普通感冒 + case_type_糖尿病 + case_type_胃炎 + case_type_腰背痛 + case_type_高血压 +
       province_Guangdong + province_Guizhou + province_Hunan + province_InnerMongolia + province_Shaanx + province_Sichuan +
-      doctor_female + management_type + ownership_type + rural_type + sp_gender + 
-      `sp_age_group_30-49` + `sp_age_group_≥50` + 
-      `doctor_age_30-50` + `doctor_age_≥50` + 
+      doctor_female + management_type + ownership_type + rural_type + sp_gender +
+      `sp_age_group_30-49` + `sp_age_group_≥50` +
+      `doctor_age_30-50` + `doctor_age_≥50` +
       doctor_ethnic +
       a2b*consultation_time + d1b*history_taking_ratio
 
@@ -6213,46 +6207,46 @@ summary(fit, ci = TRUE)
 
 
 multipleMediation <- '
-  antibiotic_prescribed ~ 
+  antibiotic_prescribed ~
       case_type_偏头痛 + case_type_压力性尿失禁 + case_type_哮喘 + case_type_小儿腹泻 + case_type_心绞痛 +
       case_type_普通感冒 + case_type_糖尿病 + case_type_胃炎 + case_type_腰背痛 + case_type_高血压 +
       province_Guangdong + province_Guizhou + province_Hunan + province_InnerMongolia + province_Shaanx + province_Sichuan +
-      doctor_female + management_type + ownership_type + rural_type + sp_gender + 
-      `sp_age_group_30-49` + `sp_age_group_≥50` + 
-      `doctor_age_30-50` + `doctor_age_≥50` + 
+      doctor_female + management_type + ownership_type + rural_type + sp_gender +
+      `sp_age_group_30-49` + `sp_age_group_≥50` +
+      `doctor_age_30-50` + `doctor_age_≥50` +
       doctor_ethnic +
-      b1*physical_exam_ratio + 
-      b2a*diagnosis_quality_clean_部分正确 + 
-      b2b*diagnosis_quality_clean_错误 + 
+      b1*physical_exam_ratio +
+      b2a*diagnosis_quality_clean_部分正确 +
+      b2b*diagnosis_quality_clean_错误 +
       c1*consultation_time
 
-  physical_exam_ratio ~ 
+  physical_exam_ratio ~
       case_type_偏头痛 + case_type_压力性尿失禁 + case_type_哮喘 + case_type_小儿腹泻 + case_type_心绞痛 +
       case_type_普通感冒 + case_type_糖尿病 + case_type_胃炎 + case_type_腰背痛 + case_type_高血压 +
       province_Guangdong + province_Guizhou + province_Hunan + province_InnerMongolia + province_Shaanx + province_Sichuan +
-      doctor_female + management_type + ownership_type + rural_type + sp_gender + 
-      `sp_age_group_30-49` + `sp_age_group_≥50` + 
-      `doctor_age_30-50` + `doctor_age_≥50` + 
+      doctor_female + management_type + ownership_type + rural_type + sp_gender +
+      `sp_age_group_30-49` + `sp_age_group_≥50` +
+      `doctor_age_30-50` + `doctor_age_≥50` +
       doctor_ethnic +
       a1*consultation_time
 
-  diagnosis_quality_clean_部分正确 ~ 
+  diagnosis_quality_clean_部分正确 ~
       case_type_偏头痛 + case_type_压力性尿失禁 + case_type_哮喘 + case_type_小儿腹泻 + case_type_心绞痛 +
       case_type_普通感冒 + case_type_糖尿病 + case_type_胃炎 + case_type_腰背痛 + case_type_高血压 +
       province_Guangdong + province_Guizhou + province_Hunan + province_InnerMongolia + province_Shaanx + province_Sichuan +
-      doctor_female + management_type + ownership_type + rural_type + sp_gender + 
-      `sp_age_group_30-49` + `sp_age_group_≥50` + 
-      `doctor_age_30-50` + `doctor_age_≥50` + 
+      doctor_female + management_type + ownership_type + rural_type + sp_gender +
+      `sp_age_group_30-49` + `sp_age_group_≥50` +
+      `doctor_age_30-50` + `doctor_age_≥50` +
       doctor_ethnic +
       a2a*consultation_time + d1a*physical_exam_ratio
 
-  diagnosis_quality_clean_错误 ~ 
+  diagnosis_quality_clean_错误 ~
       case_type_偏头痛 + case_type_压力性尿失禁 + case_type_哮喘 + case_type_小儿腹泻 + case_type_心绞痛 +
       case_type_普通感冒 + case_type_糖尿病 + case_type_胃炎 + case_type_腰背痛 + case_type_高血压 +
       province_Guangdong + province_Guizhou + province_Hunan + province_InnerMongolia + province_Shaanx + province_Sichuan +
-      doctor_female + management_type + ownership_type + rural_type + sp_gender + 
-      `sp_age_group_30-49` + `sp_age_group_≥50` + 
-      `doctor_age_30-50` + `doctor_age_≥50` + 
+      doctor_female + management_type + ownership_type + rural_type + sp_gender +
+      `sp_age_group_30-49` + `sp_age_group_≥50` +
+      `doctor_age_30-50` + `doctor_age_≥50` +
       doctor_ethnic +
       a2b*consultation_time + d1b*physical_exam_ratio
 
@@ -6284,46 +6278,46 @@ summary(fit, ci = TRUE)
 
 
 multipleMediation <- '
-  antibiotic_prescribed ~ 
+  antibiotic_prescribed ~
       case_type_偏头痛 + case_type_压力性尿失禁 + case_type_哮喘 + case_type_小儿腹泻 + case_type_心绞痛 +
       case_type_普通感冒 + case_type_糖尿病 + case_type_胃炎 + case_type_腰背痛 + case_type_高血压 +
       province_Guangdong + province_Guizhou + province_Hunan + province_InnerMongolia + province_Shaanx + province_Sichuan +
-      doctor_female + management_type + ownership_type + rural_type + sp_gender + 
-      `sp_age_group_30-49` + `sp_age_group_≥50` + 
-      `doctor_age_30-50` + `doctor_age_≥50` + 
+      doctor_female + management_type + ownership_type + rural_type + sp_gender +
+      `sp_age_group_30-49` + `sp_age_group_≥50` +
+      `doctor_age_30-50` + `doctor_age_≥50` +
       doctor_ethnic +
-      b1*lab_imaging_ratio + 
-      b2a*diagnosis_quality_clean_部分正确 + 
-      b2b*diagnosis_quality_clean_错误 + 
+      b1*lab_imaging_ratio +
+      b2a*diagnosis_quality_clean_部分正确 +
+      b2b*diagnosis_quality_clean_错误 +
       c1*consultation_time
 
-  lab_imaging_ratio ~ 
+  lab_imaging_ratio ~
       case_type_偏头痛 + case_type_压力性尿失禁 + case_type_哮喘 + case_type_小儿腹泻 + case_type_心绞痛 +
       case_type_普通感冒 + case_type_糖尿病 + case_type_胃炎 + case_type_腰背痛 + case_type_高血压 +
       province_Guangdong + province_Guizhou + province_Hunan + province_InnerMongolia + province_Shaanx + province_Sichuan +
-      doctor_female + management_type + ownership_type + rural_type + sp_gender + 
-      `sp_age_group_30-49` + `sp_age_group_≥50` + 
-      `doctor_age_30-50` + `doctor_age_≥50` + 
+      doctor_female + management_type + ownership_type + rural_type + sp_gender +
+      `sp_age_group_30-49` + `sp_age_group_≥50` +
+      `doctor_age_30-50` + `doctor_age_≥50` +
       doctor_ethnic +
       a1*consultation_time
 
-  diagnosis_quality_clean_部分正确 ~ 
+  diagnosis_quality_clean_部分正确 ~
       case_type_偏头痛 + case_type_压力性尿失禁 + case_type_哮喘 + case_type_小儿腹泻 + case_type_心绞痛 +
       case_type_普通感冒 + case_type_糖尿病 + case_type_胃炎 + case_type_腰背痛 + case_type_高血压 +
       province_Guangdong + province_Guizhou + province_Hunan + province_InnerMongolia + province_Shaanx + province_Sichuan +
-      doctor_female + management_type + ownership_type + rural_type + sp_gender + 
-      `sp_age_group_30-49` + `sp_age_group_≥50` + 
-      `doctor_age_30-50` + `doctor_age_≥50` + 
+      doctor_female + management_type + ownership_type + rural_type + sp_gender +
+      `sp_age_group_30-49` + `sp_age_group_≥50` +
+      `doctor_age_30-50` + `doctor_age_≥50` +
       doctor_ethnic +
       a2a*consultation_time + d1a*lab_imaging_ratio
 
-  diagnosis_quality_clean_错误 ~ 
+  diagnosis_quality_clean_错误 ~
       case_type_偏头痛 + case_type_压力性尿失禁 + case_type_哮喘 + case_type_小儿腹泻 + case_type_心绞痛 +
       case_type_普通感冒 + case_type_糖尿病 + case_type_胃炎 + case_type_腰背痛 + case_type_高血压 +
       province_Guangdong + province_Guizhou + province_Hunan + province_InnerMongolia + province_Shaanx + province_Sichuan +
-      doctor_female + management_type + ownership_type + rural_type + sp_gender + 
-      `sp_age_group_30-49` + `sp_age_group_≥50` + 
-      `doctor_age_30-50` + `doctor_age_≥50` + 
+      doctor_female + management_type + ownership_type + rural_type + sp_gender +
+      `sp_age_group_30-49` + `sp_age_group_≥50` +
+      `doctor_age_30-50` + `doctor_age_≥50` +
       doctor_ethnic +
       a2b*consultation_time + d1b*lab_imaging_ratio
 
@@ -6358,16 +6352,16 @@ summary(fit, ci = TRUE)
 
 simpleMediation <- '
   # 路径：consultation_time -> diagnosis_quality -> antibiotic_prescribed
-  antibiotic_prescribed ~ 
-      b2a*diagnosis_quality_clean_部分正确 + 
+  antibiotic_prescribed ~
+      b2a*diagnosis_quality_clean_部分正确 +
       b2b*diagnosis_quality_clean_错误 +
       c1*consultation_time +
       case_type_偏头痛 + case_type_压力性尿失禁 + case_type_哮喘 + case_type_小儿腹泻 + case_type_心绞痛 +
       case_type_普通感冒 + case_type_糖尿病 + case_type_胃炎 + case_type_腰背痛 + case_type_高血压 +
       province_Guangdong + province_Guizhou + province_Hunan + province_InnerMongolia + province_Shaanx + province_Sichuan +
-      doctor_female + management_type + ownership_type + rural_type + sp_gender + 
+      doctor_female + management_type + ownership_type + rural_type + sp_gender +
       `sp_age_group_30-49` + `sp_age_group_≥50` +
-      `doctor_age_30-50` + `doctor_age_≥50` + 
+      `doctor_age_30-50` + `doctor_age_≥50` +
       doctor_ethnic
 
   # 中介方程
@@ -6375,18 +6369,18 @@ simpleMediation <- '
       case_type_偏头痛 + case_type_压力性尿失禁 + case_type_哮喘 + case_type_小儿腹泻 + case_type_心绞痛 +
       case_type_普通感冒 + case_type_糖尿病 + case_type_胃炎 + case_type_腰背痛 + case_type_高血压 +
       province_Guangdong + province_Guizhou + province_Hunan + province_InnerMongolia + province_Shaanx + province_Sichuan +
-      doctor_female + management_type + ownership_type + rural_type + sp_gender + 
+      doctor_female + management_type + ownership_type + rural_type + sp_gender +
       `sp_age_group_30-49` + `sp_age_group_≥50` +
-      `doctor_age_30-50` + `doctor_age_≥50` + 
+      `doctor_age_30-50` + `doctor_age_≥50` +
       doctor_ethnic
 
   diagnosis_quality_clean_错误 ~ a2b*consultation_time +
       case_type_偏头痛 + case_type_压力性尿失禁 + case_type_哮喘 + case_type_小儿腹泻 + case_type_心绞痛 +
       case_type_普通感冒 + case_type_糖尿病 + case_type_胃炎 + case_type_腰背痛 + case_type_高血压 +
       province_Guangdong + province_Guizhou + province_Hunan + province_InnerMongolia + province_Shaanx + province_Sichuan +
-      doctor_female + management_type + ownership_type + rural_type + sp_gender + 
+      doctor_female + management_type + ownership_type + rural_type + sp_gender +
       `sp_age_group_30-49` + `sp_age_group_≥50` +
-      `doctor_age_30-50` + `doctor_age_≥50` + 
+      `doctor_age_30-50` + `doctor_age_≥50` +
       doctor_ethnic
 
   # 间接效应定义
@@ -6476,10 +6470,10 @@ result <- formal_data_final_modeimputed %>%
   mutate(
     # 就诊次数占比
     all_visits_percent = round(100 * n / total_n, 2),
-    
+
     # 抗生素处方率
     prescription_rate = antibiotic_yes / n,
-    
+
     # 计算 95% CI (用 binom.test)
     ci = list(binom.test(antibiotic_yes, n)$conf.int)
   ) %>%
@@ -6538,10 +6532,10 @@ result <- formal_data_final_modeimputed %>%
   mutate(
     # 就诊次数占比
     all_visits_percent = round(100 * n / total_n, 2),
-    
+
     # 抗生素处方率
     prescription_rate = antibiotic_yes / n,
-    
+
     # 计算 95% CI (binom.test)
     ci = list(binom.test(antibiotic_yes, n)$conf.int)
   ) %>%
