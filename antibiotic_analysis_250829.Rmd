@@ -1,0 +1,6708 @@
+---
+title: "抗生素文章"
+author: "赵青"
+date: "`r format(Sys.time(), '%a %b %d %X %Y')`"
+output:
+  html_notebook:
+    toc: TRUE
+    number_sections: yes
+
+---
+
+
+
+注意点：
+`tm` 全删了
+
+
+
+文件命名：
+
+1. `antibotic_treatments_by_cases-2025-05-14.xlsx` 是ATC、基药、AWaRe分级的文档；基药会再用`essentialmedicine.xlsx`分析
+
+1. `output_by_case_type.xlsx` 是徐老师让做的抗生素和其他药物联动分析
+
+
+
+
+
+
+数据变量：
+
+1. `formal_data_clean` 是基础数据；
+
+1. `formal_data_final_modeimputed` 是在基础数据上进行多重插补的数据；
+
+1. `excel_data` 是导入抗菌药物分布的数据；
+
+1. `qualityresult` 是何文俊的数据
+
+
+
+一定会纳入模型的变量：
+
+1. sp_age
+
+1. sp_gender
+
+1. doctor_age
+
+1. doctor_ethnic
+
+1. doctor_female
+
+1. case_type
+
+
+
+知识点：
+
+1. Firth’s penalized logistic regression和glm的family = binomial，不是一个东西对吧，另外firth不属于glm是吧
+答：不是同一个东西：glm(family = binomial) 是 标准的广义线性模型（GLM），用于拟合二项分布的响应变量，通常使用 logit 链接函数。Firth’s penalized logistic regression 是一种 修正后的逻辑回归方法，在似然函数中加入惩罚项（penalization term），用来 减少偏倚，特别适用于小样本、稀有事件、完全或准完全分离（separation）等情况。
+
+Firth方法不是标准GLM的一部分：Firth方法不能通过glm()函数直接实现，通常需要用专门的函数（如 R 中的 logistf()）。Firth回归用的是 惩罚的最大似然估计（penalized maximum likelihood estimation），而标准GLM用的是 最大似然估计（MLE）。
+
+
+2. 即便抗生素处方开设率＞0.1，但是因为产后抑郁病例存在完全分离，因此即便可以用Poisson回归估计RR，也不能使用，只能用Firth logistic 回归
+
+
+
+开抗生素比例：
+次数：222
+
+
+开药数量：
+0=1921
+1=206
+2=16
+共计238
+
+
+
+基药的文档，直接用：基药统计_20250619_111604
+
+
+
+
+```{r,echo=FALSE, warning=FALSE, message=FALSE}
+#Clear existing data and graphics
+rm(list=ls())
+graphics.off()
+
+#Setting the chunk parameter
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+
+
+```
+```{r}
+packages = c("tidyverse","lubridate","finalfit","summarytools","kableExtra","ggplot2","readxl","redcapAPI")
+packages.check <- lapply(
+  packages,
+  FUN = function(x) {
+    if (!require(x, character.only = TRUE)) {
+      install.packages(x, dependencies = TRUE)
+      suppressPackageStartupMessages(library(x, character.only = TRUE, quietly = T,warn.conflicts = F))
+    }
+  }
+)
+
+
+packages <- c("Hmisc", "ggplot2", "forcats", "redcapAPI", "tidyverse", "showtext", "ggpubr", "readxl", "kableExtra", "knitr", "this.path", "sp", "maptools", "mapproj", "RColorBrewer", "ggnewscale", "ggstatsplot", "rstantools", "PMCMRplus", "ggside","gridExtra","grid","openxlsx", "rio")
+packages.check <- lapply(
+  packages,
+  FUN = function(x) {
+    if (!require(x, character.only = TRUE)) {
+      install.packages(x, dependencies = TRUE)
+      library(x, character.only = TRUE)
+    }
+  }
+)
+
+
+
+
+```
+
+
+
+
+# 先处理数据
+
+```{r}
+
+# 加载第一个数据
+load("data_national_survey_replaced_add_r.rda")
+# 加载后，data_national_survey_replaced_add_r 会出现在当前环境中
+
+# 加载第二个数据
+load("data_national_survey_250829.rda")
+# 加载后，data_national_survey 会出现在当前环境中
+
+
+
+
+data_national_survey_replaced_add_r <- data_national_survey_replaced_add_r %>%
+  mutate(case_name = case_when(
+    visit_case == 1  ~ "偏头痛",
+    visit_case == 2  ~ "产后抑郁",
+    visit_case == 3  ~ "小儿腹泻",
+    visit_case == 4  ~ "普通感冒",
+    visit_case == 5  ~ "肺结核",
+    visit_case == 6  ~ "胃炎",
+    visit_case == 7  ~ "哮喘",
+    visit_case == 8  ~ "心绞痛",
+    visit_case == 9  ~ "腰背痛",
+    visit_case == 10 ~ "压力性尿失禁",
+    visit_case == 11 ~ "高血压",
+    visit_case == 12 ~ "糖尿病",
+    TRUE ~ NA_character_  # 其他情况赋值为 NA
+  ))
+
+
+```
+
+
+```{r}
+
+
+
+
+# # 删除 record_id 以数字开头的记录
+# data_national_survey <- data_national_survey[!grepl("^[0-9]", data_national_survey$record_id), ]
+#
+#
+#
+# # 找到所有的既有不带r，又有带 _r 的记录
+# with_r <- data_national_survey[data_national_survey$record_id %in% paste0(unique(data_national_survey$record_id), "_r"), ]
+#
+#
+# # 找到所有的不带 _r 的记录。如果同时存在basic id和带_r，保留basic id
+# without_r <- data_national_survey[!data_national_survey$record_id %in% paste0(unique(data_national_survey$record_id), "_r"), ]
+#
+#
+# # 从不带 _r 的记录中删除那些有带 _r 的对应basic id
+# for (id in unique(with_r$record_id)) {
+#   without_r <- without_r[without_r$record_id != gsub("_r$", "", id), ]
+# }
+#
+# # 合并带 _r 的记录和剩余的不带 _r 的记录
+# data_national_survey_replaced_add_r <- rbind(with_r, without_r)
+
+
+# 查一下record_id——250513：没有问题
+unique_id_df <- data.frame(record_id = unique(data_national_survey_replaced_add_r$record_id))
+
+# # 删除gz_visit710_r所在行
+# data_national_survey_replaced_add_r <- data_national_survey_replaced_add_r %>%
+#   filter(record_id != "gz_visit710_r")
+
+
+```
+
+
+
+
+```{r}
+
+# 分病例整理数据框
+
+tmp <- data_national_survey_replaced_add_r %>%
+  filter(!redcap_event_name %in% c("previsit_sp_arm_1",
+                                  "postvisit_research_arm_1",
+                                  "postvisit_research_arm_1b"))
+
+
+library(data.table)
+setDT(tmp)  # 转换为 data.table
+
+# 定义药物相关列范围
+drug_start <- which(names(tmp) == "prescription_confirm")
+drug_end <- which(names(tmp) == "drug_info_complete")
+drug_cols <- names(tmp)[drug_start:drug_end]
+
+# 定义需要填充的列（排除 redcap_event_name 和药物相关列）
+fill_cols <- setdiff(names(tmp), c("redcap_event_name", drug_cols))
+
+# 按 record_id 分组，填充非药物列
+tmp[, (fill_cols) := lapply(.SD, function(x) {
+  if (all(is.na(x))) NA else first(na.omit(x))
+}), by = record_id, .SDcols = fill_cols]
+
+
+
+
+tmp <- tmp %>%
+  filter(redcap_event_name == "afterclinic_sp_arm_1")
+
+
+
+
+
+# 删除台词准确率所在列
+data <- tmp %>%
+  dplyr::select(-(migraine_active1:active_diabetes_complete))
+
+
+
+
+
+
+
+
+
+
+# # 创建病例编号与英文名的映射
+# case_mapping <- tibble(
+#   visit_case = as.character(c(1, 2, 3, 4, 6, 7, 8, 9, 10, 11, 12)),
+#   case_name = c("migraine", "postpartum_depression", "pediatric_diarrhea",
+#                "common_cold", "gastritis", "asthma", "angina",
+#                "back_pain", "stress_incontinence", "hypertension",
+#                "diabetes")
+# )
+#
+# # —— 拆分具体病例列还是有问题
+#
+# # 拆分数据并创建独立的数据框
+# tmp %>%
+#   inner_join(case_mapping, by = "visit_case") %>%  # 关联病例名
+#   group_by(visit_case, case_name) %>%              # 按病例分组
+#   group_split() %>%                                # 拆分成列表
+#   walk(~{
+#     case_num <- unique(.x$visit_case)
+#     case_name <- unique(.x$case_name)
+#
+#     # 创建动态变量名并赋值到全局环境
+#     assign(paste0("tmp_", case_name),
+#            as.data.frame(.x),
+#            envir = .GlobalEnv)
+#
+#     message(sprintf("已创建数据框: tmp_%s (对应visit_case=%d)",
+#                    case_name, case_num))
+#   })
+
+
+
+
+
+
+
+
+
+# # 在RStudio中弹出列名查看窗口
+# View(as.data.frame(colnames(tmp)))
+# View(as.data.frame(colnames(data)))
+
+
+
+
+```
+
+
+
+## 整理处方评价的清单——药物信息
+```{r}
+
+
+
+
+
+
+data_visit_summary_2 <- data_national_survey_replaced_add_r %>%
+  filter(redcap_event_name=="previsit_researche_arm_1") %>%
+  dplyr::select(record_id, visit_case, case_name)
+
+
+
+
+
+# 提取药物信息
+
+data_national_survey_replaced_add_r %>%
+  filter(redcap_event_name=="afterclinic_sp_arm_1") %>%
+  filter(!is.na(redcap_repeat_instrument)) ->t1
+
+list_file <- list()
+
+for (case_var in unique(data_visit_summary_2$case_name)) {
+
+  drug_var_first <- "prescription_confirm"
+  drug_var_final <- "drug_info_complete"
+
+  data_visit_summary_2 %>%
+    filter(case_name==case_var) %>%
+    left_join(t1, by="record_id") %>%
+    dplyr::select(record_id, drug_var_first:drug_var_final) %>%
+    mutate(web_link=paste0("https://www.wcrcnet.cn/redcap/redcap_v15.3.1/DataEntry/record_home.php?pid=292&arm=1&id=",record_id))->t_result
+
+  current_list <- list(case_var = t_result)
+  names(current_list) <- case_var
+  list_file <- append(list_file,current_list)
+
+}
+
+
+# 生成带有当前日期的文件名
+output_filename <- paste("antibotic_drug_info_by_cases-", format(Sys.time(), "%Y-%m-%d"), ".xlsx", sep = "")
+
+# 保存Excel文件，并包含日期格式的文件名
+write.xlsx(list_file, file = output_filename)
+
+rm(output_filename)
+
+
+
+
+
+
+
+```
+
+
+用`antibotic_drug_info_by_cases-2025-05-14.xlsx`进行分析；
+
+
+
+## 整理处方评价的清单——处置信息
+```{r}
+
+
+## 把处置所有的信息都整理出来
+### Treatment
+data_national_survey_replaced_add_r %>%
+        filter(redcap_event_name=="afterclinic_sp_arm_1") %>%
+        filter(is.na(redcap_repeat_instrument)) ->t1
+
+list_file <- list()
+
+for (case_var in unique(data_visit_summary_2$case_name)) {
+
+        checklist_var_first <- switch(case_var,
+                                      "压力性尿失禁"="sui_treat1",
+                                      "偏头痛"="migraine_treat1",
+                                      "产后抑郁"="ppd_treat1",
+                                      "小儿腹泻"="diarrhea_treat1",
+                                      "普通感冒"="cold_treat1",
+                                      "胃炎"="cng_treat1",
+                                      "哮喘"="asthma_treat1",
+                                      "心绞痛"="angina_treat1",
+                                      "腰背痛"="lbp_treat1",
+                                      "高血压"="eh_treat1",
+                                      "糖尿病"="diabetes_treat3")
+
+        treatment_var_final <- switch(case_var,
+                                      "压力性尿失禁"="sui_treat14",
+                                      "偏头痛"="migraine_treat7",
+                                      "产后抑郁"="ppd_treat10",
+                                      "小儿腹泻"="diarrhea_treat11",
+                                      "普通感冒"="cold_treat12",
+                                      "胃炎"="cng_treat17",
+                                      "哮喘"="asthma_treat5",
+                                      "心绞痛"="angina_treat6",
+                                      "腰背痛"="lbp_treat12",
+                                      "高血压"="eh_treat18",
+                                      "糖尿病"="diabetes_treat11")
+
+        data_visit_summary_2 %>%
+                filter(case_name==case_var) %>%
+                left_join(t1,by="record_id") %>%
+                dplyr::select(record_id,checklist_var_first:treatment_var_final) ->t_result
+
+        current_list <- list(case_var = t_result)
+        names(current_list) <- case_var
+        list_file <- append(list_file,current_list)
+}
+
+
+# 生成带有当前日期的文件名
+output_filename <- paste("antibotic_treatments_by_cases-", format(Sys.time(), "%Y-%m-%d"), ".xlsx", sep = "")
+
+# 保存Excel文件，并包含日期格式的文件名
+write.xlsx(list_file, file = output_filename)
+
+rm(output_filename)
+
+
+
+
+```
+
+
+用`antibotic_treatments_by_cases-2025-05-14.xlsx`进行分析
+
+
+
+
+## 整理变量，准备分析
+```{r}
+
+
+
+data_analysis <- data %>%
+        group_by(record_id) %>%
+        dplyr::slice(1) %>%  # 取每组的第一行
+        ungroup()
+
+
+
+# missing_in_unique <- setdiff(data_analysis$record_id, unique_id_df$record_id)
+#
+# extra_in_unique <- setdiff(unique_id_df$record_id, data_analysis$record_id)
+
+
+
+
+# missing_afterclinic_ids <- data_national_survey_replaced_add_r |>
+#   group_by(record_id) |>
+#   filter(!any(redcap_event_name == "afterclinic_sp_arm_1")) |>
+#   pull(record_id) |>
+#   unique()
+
+
+
+
+
+
+```
+
+
+`data_analysis`的`record_id`，会比`unique1_id_df`少，因为前者有的id并没有填写`afterclinic_sp_arm_1`。打开`gs_visit_7_r`和`gs_visit_114_r`查看，都没有成功访问。
+
+所以最后纳入分析的，应该就是`data_analysis`的`record_id`。
+
+
+
+```{r}
+
+
+
+
+# View(as.data.frame(colnames(data_analysis)))
+
+data_analysis <- data_analysis %>%
+        dplyr::select( record_id, visit_case, sp_name, investigator_name,        # 单个变量
+                institution_name_register:visit_doctor,                   # 变量范围
+                ownership:ins_contractor,
+                visit_complete, visit_tracking, whether_pharmarcy,
+                migraine_q3:institution_work,
+                doctor_name0:doctor_certificate2,
+                time_arrive:drug_info_complete
+                )
+
+
+# 创建case_name映射
+data_analysis <- data_analysis %>%
+  mutate(
+    case_name = case_when(
+      visit_case == 1 ~ "偏头痛",
+      visit_case == 2 ~ "产后抑郁",
+      visit_case == 3 ~ "小儿腹泻",
+      visit_case == 4 ~ "普通感冒",
+      visit_case == 5 ~ "肺结核",
+      visit_case == 6 ~ "胃炎",
+      visit_case == 7 ~ "哮喘",
+      visit_case == 8 ~ "心绞痛",
+      visit_case == 9 ~ "腰背痛",
+      visit_case == 10 ~ "压力性尿失禁",
+      visit_case == 11 ~ "高血压",
+      visit_case == 12 ~ "糖尿病",
+      TRUE ~ NA_character_  # 处理未匹配的情况
+    ),
+    .after = visit_case  # 放在visit_case列后面
+  )
+
+data_analysis <- data_analysis %>%
+  mutate(
+    # 从 record_id 提取省份缩写（前2或3个字母，不区分大小写）
+    province_abbr = str_extract(record_id, "^[A-Za-z]{2,3}") %>% toupper(),  # 转为大写统一格式
+
+    # 根据省份缩写映射为中文名称
+    province_name = case_when(
+      province_abbr %in% c("NMG") ~ "内蒙古自治区",
+      province_abbr %in% c("HN") ~ "湖南省",
+      province_abbr %in% c("GD") ~ "广东省",
+      province_abbr %in% c("SC") ~ "四川省",
+      province_abbr %in% c("GZ") ~ "贵州省",
+      province_abbr %in% c("SX") ~ "陕西省",
+      province_abbr %in% c("GS") ~ "甘肃省",
+      TRUE ~ NA_character_  # 未匹配的设为NA
+    ),
+    .after = record_id  # 将 province_name 放在 record_id 列后
+  )
+
+
+
+
+
+```
+
+这里是我整理的除了药物和处置的其他所有原始变量，再和何文俊的`ACACIA-qualityresult-hwj-20231112.xlsx`结合，并且删除对应原始数据就好
+
+何文俊说最后纳入分析的数据量：`2143次`
+
+
+
+```{r}
+
+
+
+qualityresult <- import("ACACIA-qualityresult-hwj-20231112.xlsx", which = "赵青清洗后用来分析的数据")
+
+data_analysis_raw <- data_analysis
+
+
+
+# 删除何文俊整理的最终数据，所对应的原始数据
+data_analysis <- data_analysis %>%
+  dplyr::select(-c(migraine_q3:pppc_complete,
+           accessibility1:pharmaceutical_satisfaction_complete,
+           time_arrive:info_collection_complete,
+           province_name, case_name))
+
+
+
+# 找出在 qualityresult 但不在 data_analysis 中的 record_id——值为0，可以纳入分析
+missing_in_data <- setdiff(qualityresult$record_id, data_analysis$record_id)
+
+
+
+
+
+tmp <- qualityresult %>%
+  mutate(record_id = as.character(record_id)) %>%
+  left_join(
+    data_analysis %>% mutate(record_id = as.character(record_id)),
+    by = "record_id"
+  ) %>%
+  dplyr::select(-(prescription_confirm:drug_info_complete))
+
+
+
+```
+
+
+目前，`tmp`是除了药物信息表之外的所有变量
+
+
+
+
+
+## 连接数据
+
+```{r}
+
+
+library(openxlsx)
+
+excel_file <- "antibotic_treatments_by_cases-2025-05-14.xlsx"
+sheet_names <- getSheetNames(excel_file)
+
+# 循环读取每个 sheet
+data_list <- lapply(sheet_names, function(sheet) {
+  read.xlsx(excel_file, sheet = sheet)
+})
+
+names(data_list) <- sheet_names
+
+
+
+```
+
+
+
+
+
+
+
+
+
+```{r}
+
+
+library(writexl)
+
+
+# 1. 读取antibiotic数据——每次更改excel，都需要把前面的all重新改一下
+antibiotic_data <- read_excel("antibotic_treatments_by_cases-2025-05-14.xlsx",
+                            sheet = "all") %>%
+  # 关键步骤：对record_id去重（保留每个ID的第一条记录）
+  distinct(record_id, .keep_all = TRUE)
+
+# 2. 找出tmp中没有的列
+new_cols <- setdiff(names(antibiotic_data), names(tmp))
+
+# 3. 安全合并（确保行数不变）
+final_data <- tmp %>%
+  left_join(
+    antibiotic_data %>%
+      dplyr::select(record_id, all_of(new_cols)),
+    by = "record_id"
+  )
+
+
+
+
+
+
+final_data <- final_data %>%
+  mutate(
+    # 计算开了几种药（文字非空就算1种）
+    prescribe_all_antibiotic = {
+      # 检查是否有文字内容（NA/空字符串不算）
+      v1 <- ifelse(is.na(antibiotic_1) | antibiotic_1 == "", 0, 1)
+      v2 <- ifelse(is.na(antibiotic_2) | antibiotic_2 == "", 0, 1)
+      v1 + v2
+    },
+
+    # 计算总价格（确保价格列为数值型）
+    price_all_antibiotic = coalesce(as.numeric(antibiotic_1_price), 0) +
+                          coalesce(as.numeric(antibiotic_2_price), 0)
+  )
+
+# 验证结果
+final_data %>%
+  count(prescribe_all_antibiotic)  # 检查开药数量分布
+
+
+
+View(as.data.frame(colnames(final_data)))
+
+
+write_xlsx(final_data, path = "final_data_output.xlsx")
+
+
+
+
+```
+
+
+prescribe_all_antibiotic：指的是开了几种抗生素
+
+
+
+
+# 进入正式分析阶段
+## 数据准备与探索
+### 处理变量类型
+```{r}
+
+
+
+# 一般做法：避免中文变量出错，确保编码一致
+options(stringsAsFactors = FALSE)
+
+
+
+
+# 处理数据类型
+final_data$prescribe_any_antibiotic <- as.integer(final_data$prescribe_all_antibiotic > 0)
+
+## 分类型变量（因素变量）
+factor_vars <- c(
+  "province_name", "case_name", "doctor_ethnic", "ownership", "institution_type", "management_type", "hospital_level", "hospital_class", "univ_affiliation", "member_corporate", "member_alliance", "ins_contractor", "doctor_female", "prescribe_any_antibiotic"
+)
+
+final_data <- final_data %>%
+  mutate(across(all_of(factor_vars), as.factor))
+
+
+## diagnosis_quality 设为分类因子
+# 合并“完全正确”和“基本正确”为“正确”
+final_data$诊断质量 <- as.character(final_data$诊断质量)
+final_data$诊断质量[final_data$诊断质量 %in% c("部分正确", "基本正确")] <- "部分正确"
+
+
+final_data$诊断质量 <- factor(final_data$诊断质量,
+         levels = c("完全正确", "部分正确", "错误", "没有下诊断")
+)
+
+
+
+## doctor_age 设为有序因子
+final_data$doctor_age <- factor(
+  final_data$doctor_age,
+  levels = c(1, 2, 3),
+  labels = c("<30", "30-50", "≥50")
+)
+
+## doctor_title设为有序因子
+### 替换 9 为 NA
+final_data$doctor_title[final_data$doctor_title == 9] <- NA
+
+### 转换为有序因子
+final_data$doctor_title <- factor(
+  final_data$doctor_title,
+  levels = c(1, 2, 3, 4, 5),
+  labels = c("无职称", "住院医师", "主治医师", "副主任医师", "主任医师"),
+  ordered = TRUE
+)
+
+
+## doctor_education设为有序因子
+# 将“无法获取”编码为 NA
+final_data$doctor_education[final_data$doctor_education == 9] <- NA
+
+# 转为有序因子（高学历 → 低学历）
+final_data$doctor_education <- factor(
+  final_data$doctor_education,
+  levels = c(1, 2, 3, 4, 5),
+  labels = c("中专", "高中及以下", "大专", "大学本科", "研究生"),
+  ordered = TRUE
+)
+
+
+## doctor_certificate设为有序因子
+# 将“无法获取”编码为 NA
+final_data$doctor_certificate[final_data$doctor_certificate == 9] <- NA
+
+# 转为有序因子（从高到低）
+final_data$doctor_certificate <- factor(
+  final_data$doctor_certificate,
+  levels = c(1, 2, 3, 4),
+  labels = c("无证书", "乡村医生", "执业助理医师", "执业医师"),
+  ordered = TRUE
+)
+
+
+## 创建 ownership_type 二元分类
+final_data <- final_data %>%
+  # 创建 ownership_type 二元变量（11/12为"公立"，其他为"私立"）
+  mutate(
+    ownership_type = ifelse(ownership %in% c(11, 12), "公立", "私立"),
+    ownership_type = factor(ownership_type, levels = c("私立", "公立"))
+  ) %>%
+
+  # 删除原始 ownership 变量
+  dplyr::select(-ownership)
+
+
+
+
+
+## 创建 institution_type 五元分类
+final_data <- final_data %>%
+  mutate(
+    institution_type_group = case_when(
+      institution_type %in% c("A100", "A210", "A300") ~ "医院",
+      institution_type %in% c("B100", "B200") ~ "社区卫生中心（站）",
+      institution_type %in% c("C210", "C220") ~ "乡镇卫生院",
+      institution_type %in% c("D110", "D121", "D122", "D130", "D211", "D212", "D213", "D229") ~ "诊所",
+      institution_type == "D600" ~ "村卫生室",
+      TRUE ~ NA_character_  # 其他未分类的设为 NA
+    ),
+    institution_type_group = factor(institution_type_group,
+                                    levels = c("医院", "社区卫生中心（站）", "乡镇卫生院", "诊所", "村卫生室"))
+  )
+
+
+######## 赵厚宇老师建议，再修改一下分类
+## 创建 institution_type 五元分类
+final_data <- final_data %>%
+  mutate(
+    institution_type_houyu = case_when(
+      institution_type %in% c("A100", "A210", "A300") ~ "医院",
+      institution_type %in% c("B100") ~ "社区卫生服务中心",
+      institution_type %in% c("B200") ~ "社区卫生服务站",
+      institution_type %in% c("C210", "C220") ~ "乡镇卫生院",
+      institution_type %in% c("D110", "D121", "D122", "D130") ~ "门诊部",
+      institution_type %in% c("D211", "D212", "D213", "D229") ~ "诊所",
+      institution_type %in% c("D600") ~ "村卫生室",
+      TRUE ~ NA_character_  # 其他未分类的设为 NA
+    ),
+    institution_type_houyu = factor(institution_type_houyu,
+                                    levels = c("医院", "社区卫生服务中心", "社区卫生服务站", "乡镇卫生院", "诊所", "村卫生室"))
+  )
+
+
+## 创建 rural_type 二元分类
+final_data <- final_data %>%
+  mutate(
+    rural_type = case_when(
+      institution_type %in% c("C210", "C220", "D600") ~ "rural",
+      institution_type %in% c(
+        "A100", "A210", "A300",
+        "B100", "B200",
+        "D110", "D121", "D122", "D130",
+        "D211", "D212", "D213", "D229"
+      ) ~ "urban",
+      TRUE ~ NA_character_
+    ),
+    rural_type = factor(rural_type, levels = c("urban", "rural"))
+  )  %>%
+  dplyr::select(-institution_type)
+
+
+
+
+# ## 是否开中药的二元分类
+# final_data <- final_data %>%
+#   mutate(
+#     tm = factor(tm,
+#     levels = c(0, 1),
+#   labels = c("无中药或中成药", "有中药或中成药"))
+#   )
+
+
+
+
+# 数值型变量列表（中文）
+numeric_vars_cn <- c(
+  "推荐问诊中实际问诊的比例",
+  "推荐体格检查中实际执行的比例",
+  "推荐实验室或影像检查中实际建议的比例",
+  "问诊费", "检查费", "处置费", "其他费用",
+  "药费", "总费用",
+  "等待时间", "诊室时间", "总时间", "PPPC"
+)
+
+# 转换为 numeric（注意中文列名的处理方式）
+final_data[numeric_vars_cn] <- lapply(final_data[numeric_vars_cn], function(x) as.numeric(as.character(x)))
+
+
+
+## doctor_ethnic 民族取值9为缺失
+final_data$doctor_ethnic[final_data$doctor_ethnic == 9] <- NA
+
+
+
+## management_type 取值9修改为1
+table(final_data$management_type)
+
+
+result <- subset(final_data,
+                 management_type == 9,
+                 select = record_id)
+print(result)
+
+
+## 查询后得知三家机构，应该都是1. 非营利性
+final_data$management_type[final_data$management_type == 9] <- 1
+
+
+# 转为有序因子（从高到低）
+final_data$management_type <- factor(
+  final_data$management_type,
+  levels = c(1, 2),
+  labels = c("非营利性", "营利性")
+)
+
+
+
+# 将四个费用变量中等于0的值替换为NA
+final_data$`问诊费`[final_data$`问诊费` == 0] <- NA
+final_data$`检查费`[final_data$`检查费` == 0] <- NA
+final_data$`处置费`[final_data$`处置费` == 0] <- NA
+final_data$`总费用`[final_data$`总费用` == 0] <- NA
+
+
+
+
+
+
+
+
+
+```
+
+250720：宋再伟老师建议`非营利`和`营利`可以不纳入分析
+
+
+
+
+**什么时候转为因子：**
+
+1. 无序分类变量需要转为factor，比如数据中是字符型（character）或用数字编码（如 1=男, 2=女），如果不转为 factor，模型会：错误地把它们当成连续变量进行线性建模；
+
+1. 有序分类变量需要转为 ordered factor；
+
+1. 数值连续变量不用，二分类因变量不用。
+
+
+**是否将有序因子的水平设置为“高到低”**
+
+在 R 中使用 GLMM（如 glmer()）建模时，有序因子默认的“第一个水平”是参考组（baseline）；
+
+
+
+`record_id`
+
+391	gd_visit_524	 ——东平镇东方红卫生站	           ——应该是1，非营利性
+1845	sc_visit_2160	 ——大竹县欧家乡普山村卫生站        ——应该是1，非营利性
+2024	sx_visit_1504    ——西安市临潼区凤凰社区卫生服务中心——应该是1，非营利性
+
+
+
+
+
+### 检查数据结构与缺失
+
+
+
+#### 生成缺失率表
+```{r}
+
+# 样本量和变量数
+dim(final_data)
+
+formal_data <- final_data %>%
+  dplyr::select(
+    # 序号
+    record_id,
+
+    # 因变量
+    antibiotic_prescribed_num = prescribe_all_antibiotic,  # 重命名为更清晰的变量名
+    antibiotic_prescribed = prescribe_any_antibiotic,
+
+    # # 是否开中药/中成药
+    # tm,
+
+
+    # 地区和病例特征
+    province = province_name,
+    case_type = case_name,
+
+    # 医疗质量相关变量
+    diagnosis_quality = 诊断质量,
+    history_taking_ratio = `推荐问诊中实际问诊的比例`,  # 避免使用中文变量名
+    physical_exam_ratio = `推荐体格检查中实际执行的比例`,
+    lab_imaging_ratio = `推荐实验室或影像检查中实际建议的比例`,
+    PPPC,
+
+    # 医生特征
+    doctor_title,
+    doctor_age,
+    doctor_ethnic,
+    doctor_education,
+    doctor_certificate,
+    doctor_female,
+
+    # 机构特征
+    ownership_type,
+    rural_type,
+    management_type,
+    institution_type_houyu,
+    hospital_level,
+    hospital_class,
+    univ_affiliation,
+    member_corporate,
+    member_alliance,
+    ins_contractor,
+
+    # 费用相关
+    consultation_fee = `问诊费`,
+    examination_fee = `检查费`,
+    treatment_fee = `处置费`,
+    total_fee = `总费用`,
+
+    # 时间相关
+    waiting_time = `等待时间`,
+    consultation_time = `诊室时间`,
+    total_time = `总时间`
+  )
+
+
+
+
+# 计算缺失数和缺失率
+missing_summary <- data.frame(
+  variable = names(formal_data),
+  missing_count = sapply(formal_data, function(x) sum(is.na(x))),
+  total = nrow(formal_data)
+)
+
+# 添加缺失率列
+missing_summary$missing_rate <- round(missing_summary$missing_count / missing_summary$total, 4)
+
+# 按缺失率降序排列
+missing_summary <- missing_summary[order(-missing_summary$missing_rate), ]
+
+# 显示结果
+print(missing_summary)
+
+
+
+
+```
+
+
+MICE 和剔除变量的常用经验阈值
+
+缺失率（Missing Rate）	建议处理方式
+0–5%	可忽略或直接插补（影响极小）
+5–20%	推荐使用 MICE 等方法进行插补
+20–30%	可用 MICE 插补，但需谨慎，特别是变量重要时
+>30%	通常建议剔除（除非该变量非常关键）
+
+
+treatment_fee：处置费
+examination_fee：检查费
+doctor_education：医生教育程度
+member_alliance：是否是某个医联体或医共体的成员；
+member_corporate：是否属于⼀个医疗集团/连锁机构；
+univ_affiliation：是否是⼤学附属医疗机构；
+ins_contractor：是否是医保定点机构；
+consultation_fee：问诊费
+doctor_certificate：医生证书类别；
+hospital_class：医院等次；
+hospital_level：医院级别；
+doctor_title：医生职称
+total_fee：总体费用
+
+
+
+
+
+
+
+
+
+```{r}
+
+# 剔除缺失值多的数据
+
+## 删除缺失率超过60%的变量
+vars_to_remove <- c("treatment_fee", "examination_fee", "doctor_education",
+  "member_alliance", "member_corporate",
+  "univ_affiliation", "ins_contractor", "consultation_fee", "doctor_certificate",
+  "hospital_class", "hospital_level", "doctor_title", "total_fee"
+)
+formal_data_clean <- formal_data[, !(names(formal_data) %in% vars_to_remove)]
+
+
+str(formal_data_clean)
+
+
+```
+
+
+
+
+
+```{r}
+
+
+
+
+# 连接USP性别和年龄，并修改sp_age的三等级
+supplemental_data <- read_csv("formal_data_clean_with_sp_name.csv") %>%
+  dplyr::select(record_id, sp_gender, sp_age)  # 只保留需要的列
+
+
+# 合并数据，确保只保留formal_data_clean中的record_id
+formal_data_clean <- formal_data_clean %>%
+  left_join(supplemental_data, by = "record_id")
+
+
+
+
+formal_data_clean$sp_gender <- factor(formal_data_clean$sp_gender,
+         levels = c("女", "男")
+)
+
+
+# 设置 sp_age 为三等级分类（sp_age_group）
+formal_data_clean <- formal_data_clean %>%
+  mutate(sp_age_group = case_when(
+    sp_age <= 30 ~ "≤30",
+    sp_age > 30 & sp_age < 50 ~ "30–49",
+    sp_age >= 50 ~ "≥50",
+    TRUE ~ NA_character_
+  )) %>%
+  mutate(sp_age_group = factor(sp_age_group, levels = c("≤30", "30–49", "≥50")))
+
+
+```
+
+
+
+
+
+
+
+## 自变量探索与预处理
+### 描述性统计：连续型数据
+```{r}
+
+
+numeric_vars <- c(
+  "history_taking_ratio", "physical_exam_ratio", "lab_imaging_ratio",
+   "waiting_time", "consultation_time", "total_time", "PPPC"
+)
+
+
+# 连续变量频数统计
+formal_data_clean %>%
+  dplyr::select(all_of(numeric_vars)) %>%
+  summary()
+
+
+
+str(formal_data_clean)
+
+
+
+
+
+
+
+```
+
+
+### 描述性统计：分类型数据
+```{r}
+
+# 发现 doctor_female 变量中 "NI" 取值
+formal_data_clean$doctor_female <- as.character(formal_data_clean$doctor_female)
+formal_data_clean$doctor_female[formal_data_clean$doctor_female == "NI"] <- NA
+formal_data_clean$doctor_female <- as.factor(formal_data_clean$doctor_female)
+
+
+# 方法1：使用 forcats::fct_recode()（最简洁）
+formal_data_clean <- formal_data_clean %>%
+  mutate(
+    sp_gender = fct_recode(sp_gender, NULL = "#N/A")  # 将 "#N/A" 转为 NA
+  )
+
+
+
+
+# 发现 doctor_ethnic 变量中 "9" 取值
+formal_data_clean$doctor_ethnic <- as.character(formal_data_clean$doctor_ethnic)
+formal_data_clean$doctor_ethnic[formal_data_clean$doctor_ethnic == "9"] <- NA
+formal_data_clean$doctor_ethnic <- as.factor(formal_data_clean$doctor_ethnic)
+
+
+
+
+# factor_vars <- c(
+#   "tm", "antibiotic_prescribed","province", "case_type", "diagnosis_quality", "doctor_age", "doctor_ethnic", "doctor_female", "ownership_type", "rural_type", "management_type", "sp_gender", "sp_age_group","institution_type_houyu"
+# )
+
+
+factor_vars <- c(
+  "antibiotic_prescribed","province", "case_type", "diagnosis_quality", "doctor_age", "doctor_ethnic", "doctor_female", "ownership_type", "rural_type", "management_type", "sp_gender", "sp_age_group","institution_type_houyu"
+)
+
+
+
+
+# 分类变量频数统计
+for (var in factor_vars) {
+  cat("\n变量:", var, "\n")
+  tab <- table(formal_data_clean[[var]], useNA = "ifany")
+  prop <- prop.table(tab)
+  df <- data.frame(
+    类别 = names(tab),
+    频数 = as.vector(tab),
+    百分比 = round(100 * as.vector(prop), 1)
+  )
+  print(df)
+}
+
+
+
+
+
+
+
+```
+
+
+`antibiotic_prescribed` 百分比是9.5%，可以用OR值
+
+
+
+
+### 自变量间多重共线性检测
+#### 检测连续变量之间的线性相关性
+```{r}
+
+
+
+# 计算相关系数矩阵
+cor_matrix <- cor(formal_data_clean[, numeric_vars], use = "pairwise.complete.obs")
+print(round(cor_matrix, 2))
+
+
+
+# 四舍五入后写入 CSV 文件
+write.csv(round(cor_matrix, 2), file = "correlation_matrix.csv", row.names = TRUE)
+
+
+
+
+
+
+
+
+```
+
+连续变量间：相关系数 `|r| > 0.8` 可视为存在较强共线性。
+
+`total_fee` 和 `medication_fee` 相关性很大
+
+
+#### 检测分类变量之间的线性相关性
+```{r}
+
+
+
+
+
+library(car)
+
+# # 构造一个只含固定效应的逻辑回归模型
+# glm_model <- glm(antibiotic_prescribed ~  tm + province + case_type + diagnosis_quality + doctor_age+doctor_ethnic+doctor_female+ownership_type+rural_type+institution_type_houyu+management_type+sp_gender+sp_age_group, data = formal_data_clean, family = binomial)
+
+
+# 构造一个只含固定效应的逻辑回归模型
+glm_model <- glm(antibiotic_prescribed ~ province + case_type + diagnosis_quality + doctor_age+doctor_ethnic+doctor_female+ownership_type+rural_type+institution_type_houyu+management_type+sp_gender+sp_age_group, data = formal_data_clean, family = binomial)
+
+
+
+
+library(correlation)
+correlation::correlation(formal_data_clean[, c("province","case_type","diagnosis_quality",
+                                               "doctor_age","doctor_ethnic","doctor_female",
+                                               "ownership_type","rural_type",
+                                               "institution_type_houyu","management_type",
+                                               "sp_gender","sp_age_group")], 
+                         method = "cramer")  # 分类变量用 Cramér's V
+
+
+
+
+
+
+
+
+
+# 计算 VIF
+vif(glm_model)
+
+
+alias(glm_model)
+
+
+
+
+# 计算 VIF 并保留两位小数
+# vif_df <- data.frame(round(vif(glm_model), 2))
+
+# 保存为 CSV 文件
+write.csv(vif_df, "vif_results.csv", row.names = TRUE)
+
+
+
+# table(formal_data_clean$institution_type_houyu)
+
+
+
+# 安装一次即可
+install.packages("lsr")
+
+# 加载包
+library(lsr)
+library(dplyr)
+library(tidyr)
+library(purrr)
+
+# 定义函数：生成 Cramér's V 矩阵
+cramers_v_matrix <- function(data, vars) {
+  comb <- combn(vars, 2, simplify = FALSE)
+  
+  results <- purrr::map_df(comb, ~{
+    tibble(
+      var1 = .x[1],
+      var2 = .x[2],
+      cramers_v = lsr::cramersV(table(data[[.x[1]]], data[[.x[2]]]))
+    )
+  })
+  
+  # 转为矩阵形式
+  mat <- results %>%
+    pivot_wider(names_from = var2, values_from = cramers_v) %>%
+    column_to_rownames("var1")
+  
+  mat <- as.matrix(mat)
+  mat[lower.tri(mat)] <- t(mat)[lower.tri(mat)]
+  diag(mat) <- 1
+  
+  return(mat)
+}
+
+# 🔹 变量集合（全是分类变量）
+vars <- c("province","case_type","diagnosis_quality",
+          "doctor_age","doctor_ethnic","doctor_female",
+          "ownership_type","rural_type",
+          "institution_type_houyu","management_type",
+          "sp_gender","sp_age_group")
+
+# 计算 Cramér's V 矩阵
+cramer_matrix <- cramers_v_matrix(formal_data_clean, vars)
+
+# 输出结果，保留两位小数
+print(round(cramer_matrix, 2))
+
+
+write.csv(round(cramer_matrix, 2), "cramers_v_matrix.csv")
+
+
+
+
+
+
+```
+
+对于多类别的分类变量，**只输出总的 GVIF（以及其调整值）**是推荐做法，不需要每个虚拟变量都单独输出 VIF。——注意，这个是和管老师那篇文章不一样的地方
+
+
+
+**计算分类变量的方差膨胀因子（VIF），是在建立glmm模型时进行吗?**
+
+VIF 的计算建议在 GLMM 建立之前进行，而不是在建立 GLMM 时进行。
+原因如下：
+
+1. VIF 是评估固定效应变量之间的多重共线性工具，本质上是通过拟合一个普通的线性（或广义线性）模型计算出来的；
+
+1. GLMM 引入了随机效应（如 (1 | province_id)）之后，模型结构变复杂，VIF 的定义和计算就不再直接适用；
+
+1. 因此，推荐在建立 GLMM 之前，使用一个普通的逻辑回归模型（如 glm()）进行 VIF 检查。
+
+
+**结果解读**
+1. 没有变量 GVIF^(1/(2*Df)) 5
+   - 通常我们看的是最后一列 GVIF^(1/(2*Df))，它标准化了解释变量的自由度。
+   - 实务中若该值 > 5（有些研究更严一点用 2 或 3），说明共线性严重。
+
+1. 你的所有变量都 < 3，大多数 < 1.3，说明：
+   - 💡当前固定效应变量之间的多重共线性问题很轻微，无需删除或合并变量。
+
+
+
+## 模型构建
+
+
+
+### 执行众数插补
+```{r}
+
+
+# 定义众数函数（返回出现频率最高的值）
+get_mode <- function(v) {
+  v <- na.omit(v)
+  uniqv <- unique(v)
+  uniqv[which.max(tabulate(match(v, uniqv)))]
+}
+
+
+
+
+library(tidyverse)
+
+
+formal_data_final_modeimputed <- formal_data_clean %>%
+  mutate(
+    # 分类变量：保持类型一致，使用 coalesce + get_mode 更稳妥
+    diagnosis_quality   = coalesce(diagnosis_quality, get_mode(diagnosis_quality)),
+    doctor_age          = coalesce(doctor_age, get_mode(doctor_age)),
+    doctor_ethnic       = coalesce(doctor_ethnic, get_mode(doctor_ethnic)),
+    doctor_female       = coalesce(doctor_female, get_mode(doctor_female)),
+    rural_type          = coalesce(rural_type, get_mode(rural_type)),
+    ownership_type      = coalesce(ownership_type, get_mode(ownership_type)),
+    management_type     = coalesce(management_type, get_mode(management_type)),
+    sp_gender     = coalesce(sp_gender , get_mode(sp_gender )),
+    sp_age_group = coalesce(sp_age_group, get_mode(sp_age_group)),
+    institution_type_houyu = coalesce(institution_type_houyu, get_mode(institution_type_houyu)),
+#    tm,
+
+    # 连续变量：用中位数插补
+    physical_exam_ratio = coalesce(physical_exam_ratio, median(physical_exam_ratio, na.rm = TRUE)),
+    lab_imaging_ratio   = coalesce(lab_imaging_ratio, median(lab_imaging_ratio, na.rm = TRUE)),
+    waiting_time        = coalesce(waiting_time, median(waiting_time, na.rm = TRUE)),
+    consultation_time   = coalesce(consultation_time, median(consultation_time, na.rm = TRUE)),
+    total_time          = coalesce(total_time, median(total_time, na.rm = TRUE)),
+    sp_age              = coalesce(sp_age, median(sp_age, na.rm = TRUE)),
+  )
+
+
+
+
+str(formal_data_final_modeimputed)
+
+
+
+
+
+colSums(is.na(formal_data_final_modeimputed))
+
+
+
+
+
+
+
+
+```
+
+
+
+
+
+
+
+
+
+### 构建glm模型：
+#### 先单因素再多因素
+
+
+
+
+
+
+```{r}
+
+
+# 禁用科学计数法
+options(scipen = 999)
+
+library(dplyr)
+library(broom)
+library(car)
+library(purrr)
+
+# 设置参考组
+formal_data_final_modeimputed$case_type <- relevel(factor(formal_data_final_modeimputed$case_type), ref = "偏头痛")
+
+# 将 sp_age 转为三分类变量
+formal_data_final_modeimputed <- formal_data_final_modeimputed %>%
+  mutate(sp_age_group = case_when(
+    sp_age <= 30 ~ "≤30",
+    sp_age > 30 & sp_age < 50 ~ "30-49",
+    sp_age >= 50 ~ "≥50",
+    TRUE ~ NA_character_
+  )) %>%
+  mutate(sp_age_group = factor(sp_age_group, levels = c("≤30", "30-49", "≥50")))
+
+# 所有自变量（注意替换 sp_age 为 sp_age_group）
+# all_vars <- c(
+#   "tm", "province", "case_type", "diagnosis_quality",
+#   "history_taking_ratio", "physical_exam_ratio", "lab_imaging_ratio",
+#   "doctor_age", "doctor_ethnic", "doctor_female",
+#   "ownership_type", "rural_type", "management_type",
+#   "waiting_time", "consultation_time", "total_time", "institution_type_houyu",
+#   "sp_gender", "sp_age_group", "PPPC"
+# )
+
+
+all_vars <- c(
+  "province", "case_type", "diagnosis_quality",
+  "history_taking_ratio", "physical_exam_ratio", "lab_imaging_ratio",
+  "doctor_age", "doctor_ethnic", "doctor_female",
+  "ownership_type", "rural_type", "management_type",
+  "waiting_time", "consultation_time", "total_time", "institution_type_houyu",
+  "sp_gender", "sp_age_group", "PPPC"
+)
+
+
+
+
+# 函数：跑单因素分析并提取OR、95%CI、P值
+get_univ_results <- function(var) {
+  formula_uni <- as.formula(paste("antibiotic_prescribed ~", var))
+  model <- glm(formula_uni, data = formal_data_final_modeimputed, family = binomial)
+
+  tidy_result <- broom::tidy(model, conf.int = TRUE, exponentiate = TRUE)
+  tidy_result$variable <- var
+
+  # 提取整体P值
+  overall_p <- tryCatch({
+    p_val <- car::Anova(model, type = "II")$`Pr(>Chisq)`[1]
+    p_val
+  }, error = function(e) NA)
+
+  tidy_result$overall_p <- overall_p
+  return(tidy_result)
+}
+
+# 批量处理
+univ_all_results <- map_dfr(all_vars, get_univ_results)
+
+# 整理输出（剔除截距）并四舍五入
+univ_clean <- univ_all_results %>%
+  filter(term != "(Intercept)") %>%
+  dplyr::select(variable, term, estimate, conf.low, conf.high, p.value, overall_p) %>%
+  mutate(across(c(estimate, conf.low, conf.high, p.value, overall_p), ~ round(., 2))) %>%
+  arrange(overall_p)
+
+# 打印查看
+print(univ_clean)
+
+# 保存为 CSV，加时间戳
+timestamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
+filename <- paste0("univariate_logistic_results_", timestamp, ".csv")
+write.csv(univ_clean, filename, row.names = FALSE)
+
+str(formal_data_final_modeimputed)
+
+
+```
+
+
+数据框里，estimate → 就是 OR
+最终文档见`univariate_logistic_results_20250619_151247`
+
+
+
+
+单因素分析在流行病学研究中的标准做法：
+
+1. 筛选与结局变量（比如 antibiotic_prescribed）显著相关的因素，为后续多因素分析做准备；
+
+2. 单因素分析时，是把11个病例放入，还是什么？
+答：R 会自动处理这个因子变量，把其中 1 类设为参考组，另外 10 类分别与参考组比较，输出每一类的 OR 和 P 值。
+
+3. 另外，11个病例如果只有几个有显著意义，那怎么处理？
+答：把整个变量 case_type 放入多因素模型中，不管具体哪个类显著、哪个不显著。
+
+
+这儿只有waiting time，PPPC还有doctor ethnic是需要删除的，但是后两者是医生的个人特征，还是先纳入吧
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+### 构建glm模型，二分类变量——不用这个代码，用下面的Firth 惩罚逻辑回归
+medication_fee、other_fee没有放
+
+
+
+
+
+
+case_type各分类的OR值异常高（如普通感冒的OR=2.8亿）,当某些病例类型（如"普通感冒"）的所有患者要么全部开抗生素，要么全部不开抗生素时，会导致逻辑回归系数无限大（OR值爆炸）。需要使用 Firth校正逻辑回归 解决分离问题：
+
+另外，关于用RR还是OR值：
+1. 优先使用 OR 的情况
+✅ 研究目标为探索性分析（如变量筛选）
+✅ 存在罕见事件（<10%）或数据分离（如某些病例类型100%开抗生素）
+✅ 需要与既往文献保持一致（多数病例对照研究默认报告OR）
+
+1. 优先使用 RR 的情况
+✅ 研究目标为临床决策支持（需直接解释风险变化）
+✅ 发生率接近10%阈值（如你的9.5%）且模型收敛良好
+✅ 读者群体更熟悉RR（如公共卫生或政策研究）
+
+
+
+以上全失效，应该用偏头痛病例作为reference组——结论可以用：
+
+1. case_type普通感冒
+2. case_type胃炎
+3. case_type哮喘
+4. diagnosis_quality错误
+5. lab_imaging_ratio
+6. case_type压力性尿失禁
+7. rural_typerural
+8. consultation_time
+9. diagnosis_quality部分正确
+
+
+
+
+
+
+
+
+
+### 使用 Firth校正逻辑回归 解决分离问题：必须要用Firth校正，因为产后抑郁抗生素数量是0——
+```{r}
+
+
+# 安装并加载必要包
+if (!requireNamespace("logistf", quietly = TRUE)) {
+  install.packages("logistf")
+}
+library(logistf)
+
+if (!requireNamespace("openxlsx", quietly = TRUE)) {
+  install.packages("openxlsx")
+}
+library(openxlsx)
+
+# 设置参考水平
+formal_data_final_modeimputed$case_type <- relevel(
+  factor(formal_data_final_modeimputed$case_type),
+  ref = "偏头痛"
+)
+
+# 查看 case_type 与 antibiotic_prescribed 的分布
+table(formal_data_final_modeimputed$case_type, formal_data_final_modeimputed$antibiotic_prescribed)
+
+
+# ### 变量1：中药、删除营利非营利、赵厚宇推荐的机构分类
+# # 拟合 Firth 校正 logistic 回归模型
+# firth_model <- logistf(
+#   antibiotic_prescribed ~
+#     tm +
+#     case_type +
+#     consultation_time +
+#     diagnosis_quality +
+#     doctor_female +
+#     history_taking_ratio +
+#     lab_imaging_ratio +
+#     ownership_type +
+#     institution_type_houyu +
+#     physical_exam_ratio +
+#     province +
+#     rural_type +
+#     sp_gender +
+#     sp_age_group +
+#     total_time +
+#     doctor_age +
+#     doctor_ethnic,
+#   data = formal_data_final_modeimputed
+# )
+
+#
+# ### 变量2：发现赵厚宇老师建议的结果，跑出来之后主体研究和敏感性分析结果相差很大。最终去除tm，加上机构分类，去除营利和非营利
+# firth_model <- logistf(
+#   antibiotic_prescribed ~
+#     case_type +
+#     consultation_time +
+#     diagnosis_quality +
+#     doctor_female +
+#     history_taking_ratio +
+#     lab_imaging_ratio +
+#     ownership_type +
+#     institution_type_houyu +
+#     physical_exam_ratio +
+#     province +
+#     rural_type +
+#     sp_gender +
+#     sp_age_group +
+#     total_time +
+#     doctor_age +
+#     doctor_ethnic,
+#   data = formal_data_final_modeimputed
+# )
+
+
+
+### 变量3：发现变量2跑出来之后主体研究和敏感性分析结果相差很大。最终去除tm，去除机构分类，去除营利和非营利
+firth_model <- logistf(
+  antibiotic_prescribed ~
+    case_type +
+    consultation_time +
+    diagnosis_quality +
+    doctor_female +
+    history_taking_ratio +
+    lab_imaging_ratio +
+    ownership_type +
+    physical_exam_ratio +
+    province +
+    rural_type +
+    sp_gender +
+    sp_age_group +
+    total_time +
+    doctor_age +
+    doctor_ethnic,
+  data = formal_data_final_modeimputed
+)
+
+
+
+
+
+
+# 查看模型摘要
+summary(firth_model)
+
+# 提取估计系数（log OR）
+coef_est <- coef(firth_model)
+
+# 计算 OR，保留3位小数
+or <- round(exp(coef_est), 3)
+
+# 提取置信区间，使用 confint()，并转换为 OR 范围，保留3位小数
+ci <- confint(firth_model)
+ci_lower <- round(exp(ci[, 1]), 3)
+ci_upper <- round(exp(ci[, 2]), 3)
+
+# 提取 P 值，格式化，保留3位小数
+p_values <- format.pval(firth_model$prob, digits = 3, eps = 0.001)
+
+# 合并结果，保存为 or_table_firth
+or_table_firth <- data.frame(
+  Variable = names(coef_est),
+  OR = or,
+  CI_lower = ci_lower,
+  CI_upper = ci_upper,
+  P_value = p_values,
+  stringsAsFactors = FALSE
+)
+
+# 按 P 值升序排序
+or_table_firth <- or_table_firth[order(as.numeric(gsub("<", "", or_table_firth$P_value))), ]
+
+# 打印结果
+print(or_table_firth)
+
+# 生成带当前日期的文件名
+output_filename <- paste0("or_table_firth-", format(Sys.time(), "%Y-%m-%d"), ".xlsx")
+
+# 保存为 Excel 文件
+write.xlsx(or_table_firth, file = output_filename)
+
+# 清理临时变量
+rm(output_filename)
+
+
+
+or_table_firth
+
+
+
+
+# 提取 log-likelihood（完整模型的对数似然）
+logLik_firth <- firth_model$loglik["full"]
+
+# 参数个数（包含截距）
+k <- length(coef(firth_model))
+
+# 样本量
+n <- nrow(formal_data_final_modeimputed)
+
+# 手动计算 AIC 和 BIC
+AIC_firth <- -2 * logLik_firth + 2 * k
+BIC_firth <- -2 * logLik_firth + log(n) * k
+
+# 打印结果
+AIC_firth
+BIC_firth
+
+
+
+
+
+
+
+
+```
+
+OR > 1：该变量水平越高，更有可能发生因变量为 1（如开抗生素）
+
+OR < 1：该变量水平越高，更不可能发生因变量为 1
+
+OR = 1：该变量与因变量没有关联
+
+lab_imaging_ratio：OR = 0.39，p = 0.0069
+每单位提升 lab_imaging_ratio，处方抗生素的可能性下降了约 61%（1 - 0.39）
+
+置信区间（0.18–0.78）不包含 1，说明显著相关
+
+👉 解释：检查率越高，越不容易开抗生素，可能因为诊断更明确了。
+
+
+1. case_type普通感冒
+1. case_type胃炎
+1. case_type哮喘
+1. lab_imaging_ratio
+1. diagnosis_quality错误
+1. case_type产后抑郁
+1. rural_typerural
+1. case_type压力性尿失禁
+1. consultation_time
+1. diagnosis_quality部分正确
+
+
+
+
+
+### 构建glm模型，连续型变量——判断敏感性——原版
+```{r}
+
+# 先单因素
+
+library(car)
+library(dplyr)
+library(openxlsx)
+
+# 禁用科学计数法
+options(scipen = 999)
+
+# 设置因变量
+outcome_var <- "antibiotic_prescribed_num"
+
+# 所有自变量
+all_vars <- c("tm", "province", "case_type", "diagnosis_quality",
+              "history_taking_ratio", "physical_exam_ratio", "lab_imaging_ratio",
+              "doctor_age", "doctor_ethnic", "doctor_female",
+              "ownership_type", "rural_type", "management_type", "institution_type_houyu",
+              "waiting_time", "consultation_time", "total_time",
+              "sp_gender", "sp_age_group", "PPPC")
+
+# 分类变量列表
+categorical_vars <- c("province", "case_type", "diagnosis_quality", "doctor_age",
+                      "doctor_ethnic", "doctor_female", "ownership_type", "institution_type_houyu",
+                      "rural_type", "management_type", "sp_gender", "sp_age_group")
+
+# 确保分类变量是因子
+formal_data_final_modeimputed <- formal_data_final_modeimputed %>%
+  mutate(across(all_of(categorical_vars), as.factor))
+
+# 提取每个变量的回归结果
+univ_results <- lapply(all_vars, function(var) {
+  formula_uni <- as.formula(paste(outcome_var, "~", var))
+  model <- tryCatch(
+    glm(formula_uni, data = formal_data_final_modeimputed, family = gaussian),
+    error = function(e) return(NULL)
+  )
+  if (is.null(model)) return(NULL)
+
+  coefs <- summary(model)$coefficients
+  ci <- tryCatch(confint(model), error = function(e) return(NULL))
+  if (is.null(ci)) return(NULL)
+
+  # 排除截距
+  terms <- rownames(coefs)[-1]
+  data.frame(
+    Variable = var,
+    Term = terms,
+    Beta = round(coefs[-1, 1], 3),
+    CI_lower = round(ci[-1, 1], 3),
+    CI_upper = round(ci[-1, 2], 3),
+    P_value = round(coefs[-1, 4], 4)
+  )
+})
+
+# 合并所有变量的结果
+univ_table <- bind_rows(univ_results) %>% arrange(P_value)
+
+# 输出结果
+cat("===== 单因素线性回归：Beta, CI 和 P 值 =====\n")
+print(univ_table)
+
+
+
+# 生成带时间戳的文件名
+timestamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
+filename <- paste0("robustness_univ_results_", timestamp, ".xlsx")
+
+# 保存为 Excel
+write.xlsx(univ_table, file = filename)
+
+
+
+```
+
+最终文档见`robustness_univ_results.xlsx`
+
+
+
+
+保留<0.2的
+
+wait time 和PPPC删除
+
+
+
+
+
+```{r}
+
+# 再多因素分析——原版
+
+
+library(dplyr)
+library(openxlsx)
+
+
+
+
+## 因变量
+## outcome_var <- "antibiotic_prescribed_num"
+
+
+formal_data_final_modeimputed <- formal_data_final_modeimputed %>%
+  mutate(antibiotic_prescribed = as.numeric(as.character(antibiotic_prescribed)))
+
+
+# 因变量——二元转为数值——还是要变成二元的
+outcome_var <- "antibiotic_prescribed"
+
+
+# 最终变量列表（含强制纳入 + p<0.2）
+final_vars <- c("tm", "province", "case_type", "diagnosis_quality",
+              "history_taking_ratio", "physical_exam_ratio", "lab_imaging_ratio",
+              "doctor_age", "doctor_ethnic", "doctor_female",
+              "ownership_type", "rural_type", "institution_type_houyu",
+              "consultation_time", "total_time",
+              "sp_gender", "sp_age_group"
+)
+
+# 构建公式
+formula_multi <- as.formula(
+  paste(outcome_var, "~", paste(final_vars, collapse = " + "))
+)
+
+# 拟合多元线性回归模型
+multi_model <- lm(formula_multi, data = formal_data_final_modeimputed)
+
+# 提取模型摘要和置信区间
+model_summary <- summary(multi_model)
+
+summary(multi_model)
+
+
+model_ci <- confint(multi_model)
+
+# 构建结果表格，保留 6 位小数
+multi_results <- data.frame(
+  Term = rownames(model_summary$coefficients),
+  Coef = round(model_summary$coefficients[, "Estimate"], 6),
+  CI_lower = round(model_ci[, 1], 6),
+  CI_upper = round(model_ci[, 2], 6),
+  P_value = round(model_summary$coefficients[, "Pr(>|t|)"], 6)
+)
+
+# 去掉截距并按 P 值排序
+multi_results <- multi_results %>%
+  filter(Term != "(Intercept)") %>%
+  arrange(P_value)
+
+# 输出
+print(multi_results)
+
+# 保存为 Excel 文件（带日期）
+output_filename <- paste0("multi_results2-", format(Sys.time(), "%Y-%m-%d"), ".xlsx")
+write.xlsx(multi_results, file = output_filename)
+
+# 清理变量（可选）
+rm(output_filename)
+
+
+print(multi_model)
+
+
+
+AIC(multi_model)
+BIC(multi_model)
+
+
+
+
+
+```
+最后输出结果见`multi_results2-2025-06-26`
+
+
+
+
+
+### 构建glm模型，连续型变量——判断敏感性——赵厚宇老师建议把数据剔除产后抑郁的再跑
+```{r}
+
+library(car)
+library(dplyr)
+library(openxlsx)
+
+# 禁用科学计数法
+options(scipen = 999)
+
+# 设置因变量
+outcome_var <- "antibiotic_prescribed_num"
+
+# 所有自变量
+all_vars <- c("tm", "province", "case_type", "diagnosis_quality",
+              "history_taking_ratio", "physical_exam_ratio", "lab_imaging_ratio",
+              "doctor_age", "doctor_ethnic", "doctor_female",
+              "ownership_type", "rural_type", "management_type", "institution_type_houyu",
+              "waiting_time", "consultation_time", "total_time",
+              "sp_gender", "sp_age_group", "PPPC")
+
+# 分类变量列表
+categorical_vars <- c("province", "case_type", "diagnosis_quality", "doctor_age",
+                      "doctor_ethnic", "doctor_female", "ownership_type", "institution_type_houyu",
+                      "rural_type", "management_type", "sp_gender", "sp_age_group")
+
+# 确保分类变量是因子
+formal_data_final_modeimputed <- formal_data_final_modeimputed %>%
+  mutate(across(all_of(categorical_vars), as.factor))
+
+
+
+formal_data_final_modeimputed_houyu <- formal_data_final_modeimputed %>%
+  filter(case_type != "产后抑郁")
+
+
+
+
+# 提取每个变量的回归结果
+univ_results <- lapply(all_vars, function(var) {
+  formula_uni <- as.formula(paste(outcome_var, "~", var))
+  model <- tryCatch(
+    glm(formula_uni, data = formal_data_final_modeimputed_houyu, family = gaussian),
+    error = function(e) return(NULL)
+  )
+  if (is.null(model)) return(NULL)
+
+  coefs <- summary(model)$coefficients
+  ci <- tryCatch(confint(model), error = function(e) return(NULL))
+  if (is.null(ci)) return(NULL)
+
+  # 排除截距
+  terms <- rownames(coefs)[-1]
+  data.frame(
+    Variable = var,
+    Term = terms,
+    Beta = round(coefs[-1, 1], 3),
+    CI_lower = round(ci[-1, 1], 3),
+    CI_upper = round(ci[-1, 2], 3),
+    P_value = round(coefs[-1, 4], 4)
+  )
+})
+
+# 合并所有变量的结果
+univ_table <- bind_rows(univ_results) %>% arrange(P_value)
+
+# 输出结果
+cat("===== 单因素线性回归：Beta, CI 和 P 值 =====\n")
+print(univ_table)
+
+
+
+# 生成带时间戳的文件名
+timestamp <- format(Sys.time(), "%Y%m%d_%H%M%S")
+filename <- paste0("robustness_univ_results_houyu", timestamp, ".xlsx")
+
+# 保存为 Excel
+write.xlsx(univ_table, file = filename)
+
+
+
+```
+
+最终文档见`robustness_univ_results.xlsx`
+
+
+
+
+保留<0.2的
+
+wait time 和PPPC删除
+
+
+
+
+
+```{r}
+
+# 再多因素分析
+
+
+library(dplyr)
+library(openxlsx)
+
+
+
+
+## 因变量
+## outcome_var <- "antibiotic_prescribed_num"
+
+
+formal_data_final_modeimputed_houyu <- formal_data_final_modeimputed_houyu %>%
+  mutate(antibiotic_prescribed = as.numeric(as.character(antibiotic_prescribed)))
+
+
+# 因变量——二元转为数值——还是要变成二元的
+outcome_var <- "antibiotic_prescribed"
+
+
+
+
+# # ### 中药、删除营利非营利、赵厚宇推荐的机构分类
+# # 最终变量列表（含强制纳入 + p<0.2）
+# final_vars <- c("tm", "province", "case_type", "diagnosis_quality",
+#               "history_taking_ratio", "physical_exam_ratio", "lab_imaging_ratio",
+#               "doctor_age", "doctor_ethnic", "doctor_female",
+#               "ownership_type", "rural_type", "institution_type_houyu",
+#               "consultation_time", "total_time",
+#               "sp_gender", "sp_age_group"
+# )
+
+
+
+### 发现赵厚宇老师建议的结果，跑出来之后主体研究和敏感性分析结果相差很大。最终去除tm，加上机构分类，去除营利和非营利
+# # 最终变量列表（含强制纳入 + p<0.2）
+# final_vars <- c("province", "case_type", "diagnosis_quality",
+#               "history_taking_ratio", "physical_exam_ratio", "lab_imaging_ratio",
+#               "doctor_age", "doctor_ethnic", "doctor_female",
+#               "ownership_type", "rural_type", "institution_type_houyu",
+#               "consultation_time", "total_time",
+#               "sp_gender", "sp_age_group"
+# )
+
+
+### 发现赵厚宇老师建议的结果，跑出来之后主体研究和敏感性分析结果相差很大。最终去除tm，去除机构分类，去除营利和非营利
+final_vars <- c("province", "case_type", "diagnosis_quality",
+              "history_taking_ratio", "physical_exam_ratio", "lab_imaging_ratio",
+              "doctor_age", "doctor_ethnic", "doctor_female",
+              "ownership_type", "rural_type",
+              "consultation_time", "total_time",
+              "sp_gender", "sp_age_group"
+)
+
+
+
+# 构建公式
+formula_multi <- as.formula(
+  paste(outcome_var, "~", paste(final_vars, collapse = " + "))
+)
+
+# # 拟合多元线性回归模型
+# multi_model <- lm(formula_multi, data = formal_data_final_modeimputed_houyu)
+
+
+### 发现赵厚宇老师建议的结果，跑出来之后主体研究和敏感性分析结果相差很大。最终去除tm，加上机构分类，去除营利和非营利/三者全去除
+formal_data_final_modeimputed <- formal_data_final_modeimputed %>%
+  mutate(antibiotic_prescribed = as.numeric(as.character(antibiotic_prescribed)))
+
+
+
+
+
+multi_model <- lm(formula_multi, data = formal_data_final_modeimputed)
+
+
+# 提取模型摘要和置信区间
+model_summary <- summary(multi_model)
+
+summary(multi_model)
+
+
+model_ci <- confint(multi_model)
+
+# 构建结果表格，保留 6 位小数
+multi_results <- data.frame(
+  Term = rownames(model_summary$coefficients),
+  Coef = round(model_summary$coefficients[, "Estimate"], 6),
+  CI_lower = round(model_ci[, 1], 6),
+  CI_upper = round(model_ci[, 2], 6),
+  P_value = round(model_summary$coefficients[, "Pr(>|t|)"], 6)
+)
+
+# 去掉截距并按 P 值排序
+multi_results <- multi_results %>%
+  filter(Term != "(Intercept)") %>%
+  arrange(P_value)
+
+# 输出
+print(multi_results)
+
+# 保存为 Excel 文件（带日期）
+output_filename <- paste0("multi_results_houyu-", format(Sys.time(), "%Y-%m-%d"), ".xlsx")
+write.xlsx(multi_results, file = output_filename)
+
+# 清理变量（可选）
+rm(output_filename)
+
+
+print(multi_model)
+
+
+
+AIC(multi_model)
+BIC(multi_model)
+
+
+
+
+
+```
+最后输出结果见`multi_results_houyu-2025-07-20`
+
+
+
+
+1. case_type哮喘
+2. case_type普通感冒
+3. case_type胃炎
+4. lab_imaging_ratio
+5. case_type压力性尿失禁
+6. diagnosis_quality错误
+7. case_type糖尿病
+8. case_type高血压
+9. consultation_time
+10. sp_age
+11. case_type腰背痛
+12. case_type心绞痛
+13. diagnosis_quality部分正确
+14. rural_typerural
+
+
+
+
+
+
+
+
+
+
+
+### 构建glm模型：原始数据——比连续型变量区别更大，还是就用连续型变量吧
+#### 先单因素再多因素
+
+```{r}
+
+
+library(car)
+library(dplyr)
+
+# 禁用科学计数法
+options(scipen = 999)
+
+# 设定参考水平（可选，如你需要）
+formal_data_clean$case_type <- relevel(factor(formal_data_clean$case_type), ref = "偏头痛")
+
+# 所有变量
+all_vars <- c( "province", "case_type", "diagnosis_quality",
+  "history_taking_ratio", "physical_exam_ratio", "lab_imaging_ratio",
+  "doctor_age", "doctor_ethnic", "doctor_female",
+  "ownership_type", "rural_type", "management_type",
+  "waiting_time", "consultation_time", "total_time",
+  "sp_gender", "sp_age_group", "PPPC")
+
+
+
+
+# 单因素分析，提取每个变量的整体P值
+univ_results <- lapply(all_vars, function(var) {
+  formula_uni <- as.formula(paste("antibiotic_prescribed ~", var))
+  model <- glm(formula_uni, data = formal_data_final_modeimputed, family = binomial)
+  # 用car::Anova提取整体检验的p值
+  p_val <- tryCatch({
+    Anova(model, type = "II")$`Pr(>Chisq)`[1]
+  }, error = function(e) NA)
+  return(p_val)
+})
+
+# 创建p值表格
+univ_table <- data.frame(
+  Variable = all_vars,
+  P_value = round(unlist(univ_results), 4)
+) %>% arrange(P_value)
+
+print(univ_table)
+
+# 提取OR值、置信区间和P值
+or_ci <- lapply(all_vars, function(var) {
+  formula_uni <- as.formula(paste("antibiotic_prescribed ~", var))
+  model <- glm(formula_uni, data = formal_data_final_modeimputed, family = binomial)
+  coefs <- coef(summary(model))
+
+  # 提取全部非截距项的OR和CI
+  ci <- suppressMessages(confint(model))
+  OR <- exp(coef(model))
+  lower <- exp(ci[,1])
+  upper <- exp(ci[,2])
+
+  # 组织为数据框
+  df <- data.frame(
+    Variable = var,
+    Term = rownames(coefs)[-1],  # 去掉截距
+    OR = round(OR[-1], 3),
+    CI_lower = round(lower[-1], 3),
+    CI_upper = round(upper[-1], 3),
+    P_value = round(coefs[-1, 4], 4)
+  )
+  return(df)
+})
+
+# 合并所有单因素结果
+or_ci_table <- do.call(rbind, or_ci)
+
+# 按P值升序排列 OR+CI 表格
+or_ci_table <- or_ci_table %>% arrange(P_value)
+
+print(or_ci_table)
+
+
+
+
+
+
+
+```
+
+
+删除wait time和PPPC
+
+
+
+```{r}
+
+
+# 设置参考水平（如果需要）
+formal_data_clean$case_type <- relevel(
+  factor(formal_data_clean$case_type),
+  ref = "偏头痛"
+)
+
+# 禁用科学计数法
+options(scipen = 999)
+
+# 拟合多变量 logistic 回归模型
+final_or <- glm(
+  antibiotic_prescribed ~
+    case_type +
+    physical_exam_ratio +
+    lab_imaging_ratio +
+    sp_gender +
+    sp_age +
+    diagnosis_quality +
+    ownership_type +
+    rural_type +
+    history_taking_ratio +
+    total_time +
+    province +
+    management_type +
+    consultation_time +
+    doctor_female,
+  data = formal_data_clean,
+  family = binomial
+)
+
+# 提取模型摘要
+model_summary <- summary(final_or)
+
+# 提取 OR 和 95% CI，并保留 3 位小数
+or <- round(exp(coef(final_or)), 3)
+ci <- round(exp(confint(final_or)), 3)
+
+# 提取 P 值，科学计数法，保留 3 位小数
+p_values <- format.pval(model_summary$coefficients[, "Pr(>|z|)"], digits = 3, eps = 0.001)
+
+# 合并结果
+or_table <- data.frame(
+  Variable = names(or),
+  OR = or,
+  CI_lower = ci[, 1],
+  CI_upper = ci[, 2],
+  P_value = p_values,
+  stringsAsFactors = FALSE
+)
+
+# 按 P 值排序
+or_table <- or_table[order(as.numeric(gsub("<", "", or_table$P_value))), ]
+
+# 输出结果
+print(or_table)
+
+
+
+
+
+
+```
+
+
+lab_imaging_ratio	lab_imaging_ratio	0.310	0.138	0.644	0.003
+consultation_time	consultation_time	1.033	1.006	1.062	0.016
+case_type小儿腹泻	case_type小儿腹泻	0.165	0.030	0.876	0.037
+diagnosis_quality错误	diagnosis_quality错误	1.806	0.995	3.311	0.053
+
+
+
+
+### 构建中介模型：问诊时长 诊断正确率 抗生素处置正确率。
+```{r}
+
+# diagnosis_binary: 正确诊断 = 1，其它 = 0
+formal_data_final_modeimputed$diagnosis_binary <- ifelse(
+  formal_data_final_modeimputed$diagnosis_quality %in% c("完全正确"),
+  1, 0
+)
+
+
+# 二值化中介变量 diagnosis_quality，正确=1，其余=0——这行代码其实没用上
+formal_data_final_modeimputed$diagnosis_quality <- ifelse(
+  formal_data_final_modeimputed$diagnosis_quality %in% c("完全正确", "基本正确"), 1, 0
+)
+
+
+
+
+
+library(mediation)
+
+
+
+# 中介模型：问诊时长 → 诊断正确性（M ~ X）
+model.M <- glm(
+  diagnosis_binary ~ consultation_time +
+    sp_gender + sp_age + province + case_type +
+    doctor_female + doctor_age + doctor_ethnic +
+    ownership_type + rural_type + management_type,
+  family = binomial,
+  data = formal_data_final_modeimputed
+)
+
+# 结果模型：问诊时长 + 诊断正确性 → 抗生素处置是否正确（Y ~ X + M）
+model.Y <- glm(
+  antibiotic_prescribed ~ consultation_time + diagnosis_binary +
+    sp_gender + sp_age + province + case_type +
+    doctor_female + doctor_age + doctor_ethnic +
+    ownership_type + rural_type + management_type,
+  family = binomial,
+  data = formal_data_final_modeimputed
+)
+
+
+
+set.seed(1234)  # 可复现的结果
+med.out <- mediate(
+  model.m = model.M,
+  model.y = model.Y,
+  treat = "consultation_time",     # 自变量
+  mediator = "diagnosis_binary",  # 中介变量
+  boot = TRUE,
+  sims = 1000
+)
+
+summary(med.out)
+
+
+plot(med.out)
+
+
+# 生成带有当前日期的文件名
+output_filename <- paste("med.out-", format(Sys.time(), "%Y-%m-%d"), ".xlsx", sep = "")
+
+# 保存Excel文件，并包含日期格式的文件名
+write.xlsx(med.out, file = output_filename)
+
+rm(output_filename)
+
+
+
+
+
+
+```
+
+
+
+```{r}
+
+
+print_mediation_summary <- function(med.out, digits = 6) {
+  cat("===== Causal Mediation Analysis Summary =====\n\n")
+
+  extract_row <- function(name, est, ci, p) {
+    est_str <- format(est, digits = digits, nsmall = digits)
+    ci_str  <- paste0("[", format(ci[1], digits = digits, nsmall = digits),
+                      ", ", format(ci[2], digits = digits, nsmall = digits), "]")
+    p_str   <- format(p, digits = digits, nsmall = digits)
+    data.frame(Effect = name, Estimate = est_str, `95% CI` = ci_str, `p-value` = p_str)
+  }
+
+  result_table <- do.call(rbind, list(
+    extract_row("ACME (control)",   med.out$d0,         med.out$d0.ci,         med.out$d0.p),
+    extract_row("ACME (treated)",   med.out$d1,         med.out$d1.ci,         med.out$d1.p),
+    extract_row("ACME (average)",   med.out$d.avg,      med.out$d.avg.ci,      med.out$d.avg.p),
+    extract_row("ADE (control)",    med.out$z0,         med.out$z0.ci,         med.out$z0.p),
+    extract_row("ADE (treated)",    med.out$z1,         med.out$z1.ci,         med.out$z1.p),
+    extract_row("ADE (average)",    med.out$z.avg,      med.out$z.avg.ci,      med.out$z.avg.p),
+    extract_row("Total Effect",     med.out$tau.coef,   med.out$tau.coef.ci,   med.out$tau.p),
+    extract_row("Prop. Mediated (control)", med.out$n0, med.out$n0.ci,         med.out$n0.p),
+    extract_row("Prop. Mediated (treated)", med.out$n1, med.out$n1.ci,         med.out$n1.p),
+    extract_row("Prop. Mediated (average)", med.out$n.avg, med.out$n.avg.ci,   med.out$n.avg.p)
+  ))
+
+  print(result_table, row.names = FALSE)
+}
+
+# 假设你的中介分析结果叫 med.out
+print_mediation_summary(med.out)
+
+
+
+
+```
+
+
+```{r}
+
+
+## Total Effect 没有输出95%CI，下面自己构建
+
+# 提取 bootstrap 样本
+acme_samples <- med.out$d.avg.sim
+ade_samples <- med.out$z.avg.sim
+
+# 逐一相加得到 Total Effect 的 bootstrap 样本
+total_effect_samples <- acme_samples + ade_samples
+
+# 构造 95% CI
+total_effect_ci <- quantile(total_effect_samples, probs = c(0.025, 0.975))
+
+# 打印结果
+cat("Total Effect (from mediate):", med.out$tau.coef, "\n")
+cat("95% CI: [", total_effect_ci[1], ", ", total_effect_ci[2], "]\n")
+
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+1. ACME（Average Causal Mediation Effect）= -0.000462，p = 0.89
+表示通过中介变量 diagnosis_correct（诊断是否正确）的间接效应非常小且不显著。
+
+即：consultation_time 对 antibiotic_prescribed 的影响并不是通过“诊断是否正确”这个路径起作用的。
+
+
+2. ADE（Average Direct Effect）= 0.002043，p < 0.0000000000000002*
+表示 consultation_time 对 antibiotic_prescribed 的直接效应显著为正。
+
+即：医生在诊室停留时间越长，直接降低处方抗生素的概率（因为因变量是“是否开抗生素”，数值越小表示越少处方抗生素）。
+
+
+
+3. Total Effect（总效应）= 0.001581，p = 0.02*
+表明 consultation_time 对 antibiotic_prescribed 的总效应也是显著的。
+
+
+4. Proportion Mediated（间接路径所占比例）≈ -29%，p = 0.91
+虽然值是负的（可能因间接效应方向相反），但p 值非常不显著。
+
+表明“诊断是否正确”这一中介路径基本没有中介作用。
+
+
+本研究采用 非参数Bootstrap 方法进行中介分析，结果显示，“诊室时间”对“不合理使用抗生素”的影响主要通过直接路径产生（直接效应 ADE = 0.0020，p < 0.001），而非通过“诊断是否正确”这一中介变量（间接效应 ACME = -0.00046，p = 0.89）。间接路径不显著，说明提高诊断正确性并非“诊室时间”影响处方行为的主要机制。
+
+
+如何汇报：
+
+在中介分析的论文写作中，一般只报告 average（平均）值，不用汇报control/treated。这是大多数医学、公共卫生和社会科学期刊的惯例
+
+
+
+
+
+
+### 构建链式中介模型（陈江芸老师指导）：问诊时长 检查情况 诊断正确率 抗生素处置正确率。
+#### history_taking_ratio作为M1
+```{r}
+
+library(lavaan)
+
+mediation <- formal_data_final_modeimputed %>%
+  select(
+    consultation_time,
+    antibiotic_prescribed,
+    history_taking_ratio,
+    physical_exam_ratio,
+    lab_imaging_ratio,
+    diagnosis_quality,
+    diagnosis_binary,
+    case_type,
+    doctor_female,
+    management_type,
+    ownership_type,
+    province,
+    rural_type,
+    sp_gender,
+    sp_age_group,
+    doctor_age,
+    doctor_ethnic
+  )
+
+
+write.csv(mediation, "mediation_data.csv", row.names = FALSE)
+
+
+
+# 定义协变量名称（用于重复插入）
+covariates <- "case_type + doctor_female + management_type + ownership_type +
+               province + rural_type + sp_gender + sp_age_group + doctor_age + doctor_ethnic"
+
+# 构建带协变量的多重中介模型
+multipleMediation_cov <- paste0('
+  antibiotic_prescribed ~ b1*history_taking_ratio + b2*diagnosis_binary + c1*consultation_time + ', covariates, '
+  history_taking_ratio ~ a1*consultation_time + ', covariates, '
+  diagnosis_binary ~ a2*consultation_time + d1*history_taking_ratio + ', covariates, '
+
+  Indirect1 := a1*b1
+  Indirect2 := a2*b2
+  secondInd1 := a1*d1*b2
+  c := c1 + a1*b1 + a2*b2 + a1*d1*b2
+')
+
+# 拟合模型
+fit_cov <- sem(model = multipleMediation_cov,
+               data = mediation,
+               se = "bootstrap",
+               bootstrap = 1000)
+
+# 输出结果
+summary(fit_cov, ci = TRUE, standardized = TRUE)
+inspect(fit_cov, "r2")
+
+
+
+
+
+
+```
+
+
+检验中介模型中的系数 c'，如果不显著,即直接效应不显著，说明只有中介效应
+
+
+
+
+
+
+
+#### physical_exam_ratio作为M1
+```{r}
+
+
+
+
+library(lavaan) # 载入lavaan包
+
+
+
+### physical_exam_ratio作为M1，diagnosis_quality作为M2
+
+
+multipleMediation <- '
+antibiotic_prescribed~b1*physical_exam_ratio+b2*diagnosis_binary+c1*consultation_time
+physical_exam_ratio~a1*consultation_time
+diagnosis_binary~a2*consultation_time+d1*physical_exam_ratio
+Indirect1:=a1*b1
+Indirect2:=a2*b2
+secondInd1:=a1*d1*b2
+c:=c1+a1*b1+a2*b2+a1*d1*b2
+'
+
+
+fit <- sem(model = multipleMediation,data = mediation,se = "bootstrap",bootstrap = 1000)
+
+
+
+summary(fit,ci=T)
+
+
+
+
+```
+
+
+检验中介模型中的系数 c'，如果不显著,即直接效应不显著，说明只有中介效应
+
+
+
+
+
+#### lab_imaging_ratio作为M1
+```{r}
+
+
+
+
+library(lavaan) # 载入lavaan包
+
+
+
+### physical_exam_ratio作为M1，diagnosis_quality作为M2
+
+
+multipleMediation <- '
+antibiotic_prescribed~b1*lab_imaging_ratio+b2*diagnosis_binary+c1*consultation_time
+lab_imaging_ratio~a1*consultation_time
+diagnosis_binary~a2*consultation_time+d1*lab_imaging_ratio
+Indirect1:=a1*b1
+Indirect2:=a2*b2
+secondInd1:=a1*d1*b2
+c:=c1+a1*b1+a2*b2+a1*d1*b2
+'
+
+
+fit <- sem(model = multipleMediation,data = mediation,se = "bootstrap",bootstrap = 1000)
+
+
+
+summary(fit,ci=T)
+
+
+
+
+```
+
+
+检验中介模型中的系数 c'，如果不显著,即直接效应不显著，说明只有中介效应
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+### 分病例构建glm模型
+
+
+偏头痛只有一个取值：lab_imaging_ratio
+产后抑郁只有一个取值："physical_exam_ratio，lab_imaging_ratio
+腰背痛：sp_gender, lab_imaging_ratio
+哮喘：sp_gender
+心绞痛：sp_gender
+压力性尿失禁：sp_gender
+高血压：无
+糖尿病：无
+
+
+```{r}
+
+
+
+library(dplyr)
+
+# 替换病例名称
+case_to_check <- "糖尿病"
+
+# 过滤该病例数据
+data_case <- formal_data_final_modeimputed %>%
+  filter(case_type == case_to_check)
+
+# 拆分变量类型
+is_categorical <- sapply(data_case, function(x) is.factor(x) || is.character(x))
+is_continuous <- sapply(data_case, is.numeric)
+
+# 统计唯一值个数
+n_unique <- sapply(data_case, function(x) dplyr::n_distinct(x))
+
+# 找出只有一个水平的分类变量
+cat_one_level <- names(n_unique[is_categorical & n_unique <= 1])
+
+# 找出只有一个取值的连续变量
+cont_one_value <- names(n_unique[is_continuous & n_unique <= 1])
+
+# 输出结果
+cat("【分类变量中仅有一个水平的变量】：\n")
+print(cat_one_level)
+
+cat("\n【连续变量中仅有一个取值的变量】：\n")
+print(cont_one_value)
+
+
+
+
+
+```
+
+
+firth_model <- logistf(
+  antibiotic_prescribed ~ physical_exam_ratio + sp_gender + sp_age +
+    consultation_fee + ownership_type +
+    diagnosis_quality + history_taking_ratio + rural_type + total_time +
+    consultation_time + management_type + examination_fee +
+    province + case_type+doctor_female+doctor_age,
+  data = migraine_data
+)
+
+all_vars <- c("province", "case_type", "diagnosis_quality", "history_taking_ratio", "physical_exam_ratio", "lab_imaging_ratio", "doctor_age","doctor_ethnic", "doctor_female",
+              "ownership_type", "rural_type", "management_type",
+              "consultation_fee", "examination_fee", "treatment_fee",
+              "total_fee", "waiting_time", "consultation_time",
+              "total_time", "sp_gender","sp_age")
+
+#### 偏头痛——没开抗生素，所以没法分析
+#### 产后抑郁——没开抗生素，所以没法分析
+#### 小儿腹泻——开了，但是不收敛，所以要用Firth 惩罚逻辑回归：全都没有统计学效果
+##### 先单因素再多因素
+```{r}
+
+
+
+# 1. 过滤出产后抑郁数据
+migraine_data <- formal_data_final_modeimputed %>%
+  filter(case_type == "小儿腹泻")
+
+
+# 先单因素再多因素
+# 禁用科学计数法
+options(scipen = 999)
+
+# 记录所有变量名称
+all_vars <- c("province", "diagnosis_quality", "history_taking_ratio", "physical_exam_ratio", "lab_imaging_ratio", "doctor_age","doctor_ethnic", "doctor_female",
+              "ownership_type", "rural_type", "management_type",
+              "waiting_time", "consultation_time",
+              "total_time", "sp_gender","sp_age")
+
+# 执行单因素GLM并提取p值
+univ_results <- lapply(all_vars, function(var) {
+  formula_uni <- as.formula(paste("antibiotic_prescribed ~", var))
+  model <- glm(formula_uni, data = migraine_data, family = binomial)
+  p_val <- summary(model)$coefficients[2, 4]
+  return(p_val)
+})
+
+# 创建汇总表并格式化p值
+univ_table <- data.frame(
+  Variable = all_vars,
+  P_value = round(unlist(univ_results), 4)  # 保留四位小数
+)
+
+# （可选）按P值升序排列
+univ_table <- univ_table %>% arrange(P_value)
+
+# 打印结果
+print(univ_table)
+
+
+```
+
+小儿腹泻：P＜0.2
+consultation_time	0.0044
+total_time	0.0239
+history_taking_ratio	0.0344
+physical_exam_ratio	0.0602
+management_type	0.1188
+sp_gender	0.1533
+
+
+
+##### Firth 惩罚逻辑回归
+```{r}
+
+
+
+# 拟合 Firth 惩罚逻辑回归模型
+firth_model <- logistf(
+  formula = antibiotic_prescribed ~ consultation_time + total_time +
+    history_taking_ratio + physical_exam_ratio + management_type +
+    doctor_female + doctor_age + doctor_ethnic + sp_gender + sp_age,
+  data = migraine_data
+)
+
+# 提取 OR、置信区间和 P 值
+or <- exp(coef(firth_model))                           # OR
+ci <- exp(confint(firth_model))                        # 置信区间
+p <- firth_model$prob                                  # P 值
+
+# 整理成一个数据框
+result <- data.frame(
+  Variable = names(or),
+  OR = round(or, 3),
+  CI_lower = round(ci[, 1], 3),
+  CI_upper = round(ci[, 2], 3),
+  P_value = round(p, 4)
+)
+
+# 按 P 值升序排序
+result_sorted <- result[order(result$P_value), ]
+
+# 打印结果
+print(result_sorted)
+
+
+
+
+
+```
+
+没有统计学意义
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#### 普通感冒——开了，影响因素：diagnosis_quality错误
+##### 先单因素再多因素
+```{r}
+
+
+# 1. 过滤出产后抑郁数据
+migraine_data <- formal_data_final_modeimputed %>%
+  filter(case_type == "普通感冒")
+
+
+# 先单因素再多因素
+# 禁用科学计数法
+options(scipen = 999)
+
+# 记录所有变量名称
+all_vars <- c("province", "diagnosis_quality", "history_taking_ratio", "physical_exam_ratio", "lab_imaging_ratio", "doctor_age","doctor_ethnic", "doctor_female",
+              "ownership_type", "rural_type", "management_type",
+              "waiting_time", "consultation_time",
+              "total_time", "sp_gender","sp_age")
+
+# 执行单因素GLM并提取p值
+univ_results <- lapply(all_vars, function(var) {
+  formula_uni <- as.formula(paste("antibiotic_prescribed ~", var))
+  model <- glm(formula_uni, data = migraine_data, family = binomial)
+  p_val <- summary(model)$coefficients[2, 4]
+  return(p_val)
+})
+
+# 创建汇总表并格式化p值
+univ_table <- data.frame(
+  Variable = all_vars,
+  P_value = round(unlist(univ_results), 4)  # 保留四位小数
+)
+
+# （可选）按P值升序排列
+univ_table <- univ_table %>% arrange(P_value)
+
+# 打印结果
+print(univ_table)
+
+
+table(migraine_data$treatment_fee)
+
+
+
+```
+
+普通感冒：P＜0.2
+management_type	0.0075
+ownership_type	0.0454
+consultation_time	0.0572
+lab_imaging_ratio	0.0581
+diagnosis_quality	0.0940
+
+
+
+
+
+
+```{r}
+
+
+
+
+firth_model <- glm(
+  antibiotic_prescribed ~ management_type+ownership_type+consultation_time+lab_imaging_ratio+diagnosis_quality			+doctor_female+doctor_age+doctor_ethnic+sp_gender+sp_age,
+  data = migraine_data,
+    family = binomial
+)
+
+# 提取模型摘要
+model_summary <- summary(firth_model)
+
+# 提取 OR (RR) 和 95% CI，并保留3位小数
+or <- round(exp(coef(firth_model)), 3)
+ci <- round(exp(confint(firth_model)), 3)
+
+# 提取 P 值，科学计数法显示3位小数
+p_values <- format.pval(model_summary$coefficients[, "Pr(>|z|)"], digits = 3, eps = 0.001)
+
+# 合并结果展示
+or_table <- data.frame(
+  Variable = names(or),
+  OR = or,
+  CI_lower = ci[, 1],
+  CI_upper = ci[, 2],
+  P_value = p_values,
+  stringsAsFactors = FALSE
+)
+
+# 按 P 值排序
+or_table <- or_table[order(as.numeric(gsub("<", "", p_values))), ]
+print(or_table)
+
+
+
+
+
+```
+
+diagnosis_quality错误
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#### 胃炎——开了
+##### 先单因素再多因素
+```{r}
+
+
+# 1. 过滤出胃炎数据
+migraine_data <- formal_data_final_modeimputed %>%
+  filter(case_type == "胃炎")
+
+
+# 先单因素再多因素
+# 禁用科学计数法
+options(scipen = 999)
+
+# 记录所有变量名称
+all_vars <- c("province", "diagnosis_quality", "history_taking_ratio", "physical_exam_ratio", "lab_imaging_ratio", "doctor_age","doctor_ethnic", "doctor_female",
+              "ownership_type", "rural_type", "management_type","waiting_time", "consultation_time",
+              "total_time", "sp_gender","sp_age")
+
+# 执行单因素GLM并提取p值
+univ_results <- lapply(all_vars, function(var) {
+  formula_uni <- as.formula(paste("antibiotic_prescribed ~", var))
+  model <- glm(formula_uni, data = migraine_data, family = binomial)
+  p_val <- summary(model)$coefficients[2, 4]
+  return(p_val)
+})
+
+# 创建汇总表并格式化p值
+univ_table <- data.frame(
+  Variable = all_vars,
+  P_value = round(unlist(univ_results), 4)  # 保留四位小数
+)
+
+# （可选）按P值升序排列
+univ_table <- univ_table %>% arrange(P_value)
+
+# 打印结果
+print(univ_table)
+
+
+```
+
+胃炎：P＜0.2
+sp_age	0.0052
+sp_gender	0.0101
+ownership_type	0.0374
+rural_type	0.0491
+lab_imaging_ratio	0.1464
+
+
+
+
+
+```{r}
+
+
+
+firth_model <- glm(
+  antibiotic_prescribed ~ sp_age+sp_gender+ownership_type+rural_type+lab_imaging_ratio+doctor_female+doctor_age+doctor_ethnic,
+  data = migraine_data,
+    family = binomial
+)
+
+# 提取模型摘要
+model_summary <- summary(firth_model)
+
+# 提取 OR (RR) 和 95% CI，并保留3位小数
+or <- round(exp(coef(firth_model)), 3)
+ci <- round(exp(confint(firth_model)), 3)
+
+# 提取 P 值，科学计数法显示3位小数
+p_values <- format.pval(model_summary$coefficients[, "Pr(>|z|)"], digits = 3, eps = 0.001)
+
+# 合并结果展示
+or_table <- data.frame(
+  Variable = names(or),
+  OR = or,
+  CI_lower = ci[, 1],
+  CI_upper = ci[, 2],
+  P_value = p_values,
+  stringsAsFactors = FALSE
+)
+
+# 按 P 值排序
+or_table <- or_table[order(as.numeric(gsub("<", "", p_values))), ]
+print(or_table)
+
+
+
+
+
+```
+
+影响因素：
+
+1. ownership_type公立
+1. rural_typerural
+
+
+
+
+
+
+
+
+#### 哮喘——开了：doctor_ethnic2完全分离，所以要用Firth 惩罚逻辑回归
+##### 先单因素再多因素
+```{r}
+
+
+# 1. 过滤出胃炎数据
+migraine_data <- formal_data_final_modeimputed %>%
+  filter(case_type == "哮喘")
+
+
+# 先单因素再多因素
+# 禁用科学计数法
+options(scipen = 999)
+
+# 记录所有变量名称
+all_vars <- c("province", "diagnosis_quality", "history_taking_ratio", "physical_exam_ratio", "lab_imaging_ratio", "doctor_age","doctor_ethnic", "doctor_female",
+              "ownership_type", "rural_type", "management_type","waiting_time", "consultation_time",
+              "total_time", "sp_age")
+
+# 执行单因素GLM并提取p值
+univ_results <- lapply(all_vars, function(var) {
+  formula_uni <- as.formula(paste("antibiotic_prescribed ~", var))
+  model <- glm(formula_uni, data = migraine_data, family = binomial)
+  p_val <- summary(model)$coefficients[2, 4]
+  return(p_val)
+})
+
+# 创建汇总表并格式化p值
+univ_table <- data.frame(
+  Variable = all_vars,
+  P_value = round(unlist(univ_results), 4)  # 保留四位小数
+)
+
+# （可选）按P值升序排列
+univ_table <- univ_table %>% arrange(P_value)
+
+# 打印结果
+print(univ_table)
+
+
+```
+
+哮喘：P＜0.2
+lab_imaging_ratio	0.0091
+consultation_time	0.0136
+rural_type	0.0530
+waiting_time	0.0836
+ownership_type	0.1711
+
+
+```{r}
+
+
+
+# 使用 logistf 进行 Firth 惩罚逻辑回归
+firth_model <- logistf(
+  formula = antibiotic_prescribed ~ lab_imaging_ratio + consultation_time +
+    rural_type + waiting_time + ownership_type + doctor_female +
+    doctor_age + doctor_ethnic + sp_age,
+  data = migraine_data,
+  pl = TRUE  # 启用精确 profile likelihood CI（默认建议启用）
+)
+
+# 提取 OR 和 CI
+or <- round(exp(firth_model$coefficients), 3)
+ci <- round(exp(confint(firth_model)), 3)  # logistf 自带 confint 方法
+
+# 提取 P 值，科学计数法显示 3 位小数
+p_values <- format.pval(firth_model$prob, digits = 3, eps = 0.001)
+
+# 合并结果表格
+or_table <- data.frame(
+  Variable = names(or),
+  OR = or,
+  CI_lower = ci[, 1],
+  CI_upper = ci[, 2],
+  P_value = p_values,
+  stringsAsFactors = FALSE
+)
+
+# 按 P 值排序
+or_table <- or_table[order(as.numeric(gsub("<", "", or_table$P_value))), ]
+
+# 打印结果
+print(or_table)
+
+
+
+
+
+```
+
+影响因素：
+
+1. consultation_time
+1. lab_imaging_ratio
+
+
+
+
+
+
+
+
+
+
+
+
+#### 心绞痛——开了：doctor_age完全分离，所以要用Firth惩罚逻辑回归
+##### 先单因素再多因素
+```{r}
+
+
+# 1. 过滤出心绞痛数据
+migraine_data <- formal_data_final_modeimputed %>%
+  filter(case_type == "心绞痛")
+
+
+# 先单因素再多因素
+# 禁用科学计数法
+options(scipen = 999)
+
+# 记录所有变量名称
+all_vars <- c("province", "diagnosis_quality", "history_taking_ratio", "physical_exam_ratio", "lab_imaging_ratio", "doctor_age","doctor_ethnic", "doctor_female",
+              "ownership_type", "rural_type", "management_type","waiting_time", "consultation_time",
+              "total_time", "sp_age")
+
+# 执行单因素GLM并提取p值
+univ_results <- lapply(all_vars, function(var) {
+  formula_uni <- as.formula(paste("antibiotic_prescribed ~", var))
+  model <- glm(formula_uni, data = migraine_data, family = binomial)
+  p_val <- summary(model)$coefficients[2, 4]
+  return(p_val)
+})
+
+# 创建汇总表并格式化p值
+univ_table <- data.frame(
+  Variable = all_vars,
+  P_value = round(unlist(univ_results), 4)  # 保留四位小数
+)
+
+# （可选）按P值升序排列
+univ_table <- univ_table %>% arrange(P_value)
+
+# 打印结果
+print(univ_table)
+
+
+```
+
+心绞痛：P＜0.2
+total_time	0.0198
+waiting_time	0.1194
+
+
+```{r}
+
+
+
+
+# 使用 logistf 进行 Firth 惩罚逻辑回归
+firth_model <- logistf(
+  formula = antibiotic_prescribed ~ total_time+waiting_time+doctor_female+doctor_age+doctor_ethnic+sp_age,
+  data = migraine_data,
+  pl = TRUE  # 启用精确 profile likelihood CI（默认建议启用）
+)
+
+# 提取 OR 和 CI
+or <- round(exp(firth_model$coefficients), 3)
+ci <- round(exp(confint(firth_model)), 3)  # logistf 自带 confint 方法
+
+# 提取 P 值，科学计数法显示 3 位小数
+p_values <- format.pval(firth_model$prob, digits = 3, eps = 0.001)
+
+# 合并结果表格
+or_table <- data.frame(
+  Variable = names(or),
+  OR = or,
+  CI_lower = ci[, 1],
+  CI_upper = ci[, 2],
+  P_value = p_values,
+  stringsAsFactors = FALSE
+)
+
+# 按 P 值排序
+or_table <- or_table[order(as.numeric(gsub("<", "", or_table$P_value))), ]
+
+# 打印结果
+print(or_table)
+
+
+
+
+
+```
+
+影响因素：
+
+1. total_time
+1. doctor_female1
+
+
+
+
+
+
+
+
+
+
+#### 腰背痛——开了：doctor_age，doctor_ethnic2完全分离，所以要用Firth惩罚逻辑回归
+##### 先单因素再多因素
+```{r}
+
+
+
+# 1. 过滤出心绞痛数据
+migraine_data <- formal_data_final_modeimputed %>%
+  filter(case_type == "腰背痛")
+
+
+# 先单因素再多因素
+# 禁用科学计数法
+options(scipen = 999)
+
+# 记录所有变量名称
+all_vars <- c("province", "diagnosis_quality", "history_taking_ratio", "physical_exam_ratio", "doctor_age","doctor_ethnic", "doctor_female",
+              "ownership_type", "rural_type", "management_type","waiting_time", "consultation_time",
+              "total_time", "sp_age")
+
+# 执行单因素GLM并提取p值
+univ_results <- lapply(all_vars, function(var) {
+  formula_uni <- as.formula(paste("antibiotic_prescribed ~", var))
+  model <- glm(formula_uni, data = migraine_data, family = binomial)
+  p_val <- summary(model)$coefficients[2, 4]
+  return(p_val)
+})
+
+# 创建汇总表并格式化p值
+univ_table <- data.frame(
+  Variable = all_vars,
+  P_value = round(unlist(univ_results), 4)  # 保留四位小数
+)
+
+# （可选）按P值升序排列
+univ_table <- univ_table %>% arrange(P_value)
+
+# 打印结果
+print(univ_table)
+
+
+```
+
+腰背痛：P＜0.2
+management_type	0.0042
+ownership_type	0.0609
+history_taking_ratio	0.1425
+
+
+1. doctor_female
+1. doctor_age
+1. doctor_ethnic
+1. sp_gender
+1. sp_age
+
+```{r}
+
+
+
+# 使用 logistf 进行 Firth 惩罚逻辑回归
+firth_model <- logistf(
+  formula = antibiotic_prescribed ~ management_type+ownership_type+history_taking_ratio+doctor_female+doctor_age+doctor_ethnic+sp_age,
+  data = migraine_data,
+  pl = TRUE  # 启用精确 profile likelihood CI（默认建议启用）
+)
+
+# 提取 OR 和 CI
+or <- round(exp(firth_model$coefficients), 3)
+ci <- round(exp(confint(firth_model)), 3)  # logistf 自带 confint 方法
+
+# 提取 P 值，科学计数法显示 3 位小数
+p_values <- format.pval(firth_model$prob, digits = 3, eps = 0.001)
+
+# 合并结果表格
+or_table <- data.frame(
+  Variable = names(or),
+  OR = or,
+  CI_lower = ci[, 1],
+  CI_upper = ci[, 2],
+  P_value = p_values,
+  stringsAsFactors = FALSE
+)
+
+# 按 P 值排序
+or_table <- or_table[order(as.numeric(gsub("<", "", or_table$P_value))), ]
+
+# 打印结果
+print(or_table)
+
+
+
+
+
+```
+
+影响因素：
+
+无
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#### 压力性尿失禁——开了：没有sp_gender。没有影响因素
+##### 先单因素再多因素——单因素也没有统计学意义
+```{r}
+
+
+
+# 1. 过滤出压力性尿失禁数据
+migraine_data <- formal_data_final_modeimputed %>%
+  filter(case_type == "压力性尿失禁")
+
+
+# 先单因素再多因素
+# 禁用科学计数法
+options(scipen = 999)
+
+# 记录所有变量名称
+all_vars <- c("province", "diagnosis_quality", "history_taking_ratio", "physical_exam_ratio", "lab_imaging_ratio", "doctor_age","doctor_ethnic", "doctor_female",
+              "ownership_type", "rural_type", "management_type","waiting_time", "consultation_time",
+              "total_time", "sp_age")
+
+# 执行单因素GLM并提取p值
+univ_results <- lapply(all_vars, function(var) {
+  formula_uni <- as.formula(paste("antibiotic_prescribed ~", var))
+  model <- glm(formula_uni, data = migraine_data, family = binomial)
+  p_val <- summary(model)$coefficients[2, 4]
+  return(p_val)
+})
+
+# 创建汇总表并格式化p值
+univ_table <- data.frame(
+  Variable = all_vars,
+  P_value = round(unlist(univ_results), 4)  # 保留四位小数
+)
+
+# （可选）按P值升序排列
+univ_table <- univ_table %>% arrange(P_value)
+
+# 打印结果
+print(univ_table)
+
+
+```
+
+压力性尿失禁：P＜0.2
+无
+
+
+
+1. doctor_female
+1. doctor_age
+1. doctor_ethnic
+1. sp_gender
+1. sp_age
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#### 高血压——开了：doctor_age,doctor_ethnic完全分离，所以要用Firth惩罚逻辑回归。没有影响因素
+##### 先单因素再多因素
+```{r}
+
+
+# 1. 过滤出胃炎数据
+migraine_data <- formal_data_final_modeimputed %>%
+  filter(case_type == "高血压")
+
+
+# 先单因素再多因素
+# 禁用科学计数法
+options(scipen = 999)
+
+# 记录所有变量名称
+all_vars <- c("province", "diagnosis_quality", "history_taking_ratio", "physical_exam_ratio", "lab_imaging_ratio", "doctor_age","doctor_ethnic", "doctor_female",
+              "ownership_type", "rural_type", "management_type","waiting_time", "consultation_time",
+              "total_time", "sp_gender","sp_age")
+
+# 执行单因素GLM并提取p值
+univ_results <- lapply(all_vars, function(var) {
+  formula_uni <- as.formula(paste("antibiotic_prescribed ~", var))
+  model <- glm(formula_uni, data = migraine_data, family = binomial)
+  p_val <- summary(model)$coefficients[2, 4]
+  return(p_val)
+})
+
+# 创建汇总表并格式化p值
+univ_table <- data.frame(
+  Variable = all_vars,
+  P_value = round(unlist(univ_results), 4)  # 保留四位小数
+)
+
+# （可选）按P值升序排列
+univ_table <- univ_table %>% arrange(P_value)
+
+# 打印结果
+print(univ_table)
+
+
+```
+
+高血压：P＜0.2
+diagnosis_quality	0.1420
+sp_age	0.1716
+
+
+
+
+
+```{r}
+
+
+
+# 使用 logistf 进行 Firth 惩罚逻辑回归
+firth_model <- logistf(
+  formula = antibiotic_prescribed ~ sp_age+sp_gender+diagnosis_quality+doctor_female+doctor_age+doctor_ethnic,
+  data = migraine_data,
+  pl = TRUE  # 启用精确 profile likelihood CI（默认建议启用）
+)
+
+# 提取 OR 和 CI
+or <- round(exp(firth_model$coefficients), 3)
+ci <- round(exp(confint(firth_model)), 3)  # logistf 自带 confint 方法
+
+# 提取 P 值，科学计数法显示 3 位小数
+p_values <- format.pval(firth_model$prob, digits = 3, eps = 0.001)
+
+# 合并结果表格
+or_table <- data.frame(
+  Variable = names(or),
+  OR = or,
+  CI_lower = ci[, 1],
+  CI_upper = ci[, 2],
+  P_value = p_values,
+  stringsAsFactors = FALSE
+)
+
+# 按 P 值排序
+or_table <- or_table[order(as.numeric(gsub("<", "", or_table$P_value))), ]
+
+# 打印结果
+print(or_table)
+
+
+
+
+
+```
+
+没有影响因素
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#### 糖尿病——开了：doctor_age,doctor_ethnic完全分离，所以要用Firth惩罚逻辑回归。没有影响因素
+##### 先单因素再多因素
+```{r}
+
+
+# 1. 过滤出胃炎数据
+migraine_data <- formal_data_final_modeimputed %>%
+  filter(case_type == "糖尿病")
+
+
+# 先单因素再多因素
+# 禁用科学计数法
+options(scipen = 999)
+
+# 记录所有变量名称
+all_vars <- c("province", "diagnosis_quality", "history_taking_ratio", "physical_exam_ratio", "lab_imaging_ratio", "doctor_age","doctor_ethnic", "doctor_female",
+              "ownership_type", "rural_type", "management_type","waiting_time", "consultation_time",
+              "total_time", "sp_gender","sp_age")
+
+# 执行单因素GLM并提取p值
+univ_results <- lapply(all_vars, function(var) {
+  formula_uni <- as.formula(paste("antibiotic_prescribed ~", var))
+  model <- glm(formula_uni, data = migraine_data, family = binomial)
+  p_val <- summary(model)$coefficients[2, 4]
+  return(p_val)
+})
+
+# 创建汇总表并格式化p值
+univ_table <- data.frame(
+  Variable = all_vars,
+  P_value = round(unlist(univ_results), 4)  # 保留四位小数
+)
+
+# （可选）按P值升序排列
+univ_table <- univ_table %>% arrange(P_value)
+
+# 打印结果
+print(univ_table)
+
+
+```
+
+糖尿病：P＜0.2
+sp_age
+
+
+
+
+
+```{r}
+
+
+
+
+# 使用 logistf 进行 Firth 惩罚逻辑回归
+firth_model <- logistf(
+  formula = antibiotic_prescribed ~ sp_age+sp_gender+doctor_female+doctor_age+doctor_ethnic,
+  data = migraine_data,
+  pl = TRUE  # 启用精确 profile likelihood CI（默认建议启用）
+)
+
+# 提取 OR 和 CI
+or <- round(exp(firth_model$coefficients), 3)
+ci <- round(exp(confint(firth_model)), 3)  # logistf 自带 confint 方法
+
+# 提取 P 值，科学计数法显示 3 位小数
+p_values <- format.pval(firth_model$prob, digits = 3, eps = 0.001)
+
+# 合并结果表格
+or_table <- data.frame(
+  Variable = names(or),
+  OR = or,
+  CI_lower = ci[, 1],
+  CI_upper = ci[, 2],
+  P_value = p_values,
+  stringsAsFactors = FALSE
+)
+
+# 按 P 值排序
+or_table <- or_table[order(as.numeric(gsub("<", "", or_table$P_value))), ]
+
+# 打印结果
+print(or_table)
+
+
+
+
+
+```
+
+没有影响因素
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+### 分系统构建glm模型
+1. 神经系统
+偏头痛（1）：与大脑神经和血管功能异常相关。
+
+产后抑郁（2）：属于精神心理障碍，与神经递质失衡有关。
+
+2. 消化系统
+⼩⼉腹泻（3）：通常由肠道感染或消化功能紊乱引起。
+
+胃炎（6）：胃黏膜的炎症，属于消化系统疾病。
+
+3. 呼吸系统
+普通感冒（4）：上呼吸道感染（鼻、咽、喉）。
+
+哮喘（7）：慢性气道炎症性疾病。
+
+4. 循环系统（心血管系统）
+⼼绞痛（8）：冠状动脉供血不足导致的心脏病。
+
+⾼⾎压（11）：涉及血管压力异常，属于心血管疾病。
+
+5. 内分泌系统
+糖尿病（12）：胰岛素分泌或作用异常导致的代谢性疾病。
+
+6. 泌尿系统
+压⼒性尿失禁（10）：与膀胱和尿道控制功能异常相关。
+
+7. 运动系统（肌肉骨骼系统）
+腰背痛（9）：可能由肌肉、骨骼或神经问题引起，如腰椎间盘突出、肌肉拉伤等。
+
+
+#### 神经系统——偏头痛+产后抑郁
+##### 先单因素再多因素
+```{r}
+
+# 1. 过滤出产后抑郁数据
+migraine_data <- formal_data_final_modeimputed %>%
+  filter(case_type == "小儿腹泻")
+
+
+# 先单因素再多因素
+# 禁用科学计数法
+options(scipen = 999)
+
+# 记录所有变量名称
+all_vars <- c("province", "diagnosis_quality", "history_taking_ratio", "physical_exam_ratio", "lab_imaging_ratio", "doctor_age","doctor_ethnic", "doctor_female",
+              "ownership_type", "rural_type", "management_type",
+              "consultation_fee", "total_fee", "waiting_time", "consultation_time",
+              "total_time", "sp_gender","sp_age")
+
+# 执行单因素GLM并提取p值
+univ_results <- lapply(all_vars, function(var) {
+  formula_uni <- as.formula(paste("antibiotic_prescribed ~", var))
+  model <- glm(formula_uni, data = migraine_data, family = binomial)
+  p_val <- summary(model)$coefficients[2, 4]
+  return(p_val)
+})
+
+# 创建汇总表并格式化p值
+univ_table <- data.frame(
+  Variable = all_vars,
+  P_value = round(unlist(univ_results), 4)  # 保留四位小数
+)
+
+# （可选）按P值升序排列
+univ_table <- univ_table %>% arrange(P_value)
+
+# 打印结果
+print(univ_table)
+
+
+```
+
+小儿腹泻：P＜0.2
+consultation_time	0.0044
+total_fee	0.0048
+total_time	0.0239
+history_taking_ratio	0.0344
+physical_exam_ratio	0.0602
+management_type	0.1188
+sp_gender	0.1533
+
+
+
+
+
+
+```{r}
+
+
+
+firth_model <- glm(
+  antibiotic_prescribed ~ consultation_time + total_fee + total_time + history_taking_ratio+physical_exam_ratio+management_type+sp_gender,
+  data = migraine_data,
+    family = binomial
+)
+
+# 提取模型摘要
+model_summary <- summary(firth_model)
+
+# 提取 OR (RR) 和 95% CI，并保留3位小数
+or <- round(exp(coef(firth_model)), 3)
+ci <- round(exp(confint(firth_model)), 3)
+
+# 提取 P 值，科学计数法显示3位小数
+p_values <- format.pval(model_summary$coefficients[, "Pr(>|z|)"], digits = 3, eps = 0.001)
+
+# 合并结果展示
+or_table <- data.frame(
+  Variable = names(or),
+  OR = or,
+  CI_lower = ci[, 1],
+  CI_upper = ci[, 2],
+  P_value = p_values,
+  stringsAsFactors = FALSE
+)
+
+# 按 P 值排序
+or_table <- or_table[order(as.numeric(gsub("<", "", p_values))), ]
+print(or_table)
+
+
+
+
+```
+
+
+
+
+antibotic_treatments_by_cases.xlsx
+
+
+
+
+
+
+
+## 抗生素分布
+### 导入抗菌药物分布的数据
+```{r}
+
+library(readxl)
+library(dplyr)
+
+# 读取 Excel 中的 record_id（假设只有一个 sheet）
+excel_data <- read_excel("antibotic_treatments_by_cases-2025-05-14.xlsx", sheet = "all")
+excel_ids <- unique(excel_data$record_id)
+
+# 读取 formal_data_final_modeimputed 中的 record_id
+data_ids <- unique(formal_data_final_modeimputed$record_id)
+
+# 比较差异
+only_in_excel <- setdiff(excel_ids, data_ids)
+only_in_data <- setdiff(data_ids, excel_ids)
+
+# 输出结果
+cat("只在 Excel 中的 record_id 数量：", length(only_in_excel), "\n")
+print(only_in_excel)
+
+cat("只在数据框 formal_data_final_modeimputed 中的 record_id 数量：", length(only_in_data), "\n")
+print(only_in_data)
+
+
+
+
+
+```
+
+
+
+
+
+### 整体处方率
+
+1. `formal_data_clean` 是基础数据；
+
+1. `formal_data_final_modeimputed` 是在基础数据上进行多重插补的数据；
+
+1. `excel_data` 是导入抗菌药物分布的数据
+
+
+```{r}
+# 导入数据
+
+prescription_rate_data <- formal_data_clean %>%
+  left_join(excel_data, by = "record_id")
+
+
+colnames(prescription_rate_data)
+
+table(prescription_rate_data$antibiotic_prescribed)
+
+
+
+
+
+
+```
+
+
+
+
+
+#### 全样本处方率
+```{r}
+
+prescription_rate_data %>%
+  summarise(prescription_rate = mean(antibiotic_prescribed == "1", na.rm = TRUE)) %>%
+  kable(digits = 3, caption = "表1：全样本抗生素处方率") %>%
+  kable_styling(full_width = FALSE)
+
+
+
+
+```
+
+
+
+
+
+#### Table 2. Characteristics of Antibiotic Prescribing Across 11 Conditions in Primary Healthcare Facilities in China
+```{r}
+
+library(dplyr)
+library(tidyr)
+library(openxlsx)
+
+# 所有病例类型
+all_case_types <- c(
+  "偏头痛", "压力性尿失禁", "哮喘", "小儿腹泻", "心绞痛",
+  "普通感冒", "糖尿病", "胃炎", "腰背痛", "高血压", "产后抑郁"
+)
+
+# 添加SP年龄分组
+prescription_rate_data <- prescription_rate_data %>%
+  mutate(sp_age_group = case_when(
+    sp_age < 30 ~ "<30岁",
+    sp_age >= 30 & sp_age < 50 ~ "30-49岁",
+    sp_age >= 50 ~ "≥50岁",
+    TRUE ~ NA_character_
+  ))
+
+# 分组变量列表
+group_vars <- list(
+  "省份" = "province",
+  "城乡类型" = "rural_type",
+  "公私立" = "management_type",
+  "医生年龄" = "doctor_age",
+  "医生性别" = "doctor_female",
+  "SP性别" = "sp_gender",
+  "SP年龄" = "sp_age_group"
+)
+
+results_list <- list()
+
+# 总体样本数
+total_n <- prescription_rate_data %>%
+  filter(!is.na(antibiotic_prescribed)) %>%
+  nrow()
+
+abx_n <- prescription_rate_data %>%
+  filter(antibiotic_prescribed == 1) %>%
+  nrow()
+
+# 每种病例类型总访问和抗生素开具数（用于前两行）
+overall_visit_row <- prescription_rate_data %>%
+  filter(!is.na(antibiotic_prescribed)) %>%
+  group_by(case_type) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  complete(case_type = all_case_types, fill = list(n = 0)) %>%
+  mutate(
+    特征类型 = "总体汇总",
+    特征名称 = "Overall Visit"
+  ) %>%
+  pivot_wider(names_from = case_type, values_from = n, values_fill = 0)
+
+overall_abx_row <- prescription_rate_data %>%
+  filter(!is.na(antibiotic_prescribed)) %>%
+  group_by(case_type) %>%
+  summarise(abx_n = sum(antibiotic_prescribed == 1), .groups = "drop") %>%
+  complete(case_type = all_case_types, fill = list(abx_n = 0)) %>%
+  left_join(
+    prescription_rate_data %>%
+      filter(!is.na(antibiotic_prescribed)) %>%
+      group_by(case_type) %>%
+      summarise(total_n = n(), .groups = "drop"),
+    by = "case_type"
+  ) %>%
+  mutate(
+    n = paste0(abx_n, " (", ifelse(total_n == 0, "NA", sprintf("%.2f", abx_n / total_n * 100)), "%)"),
+    特征类型 = "总体汇总",
+    特征名称 = "Overall Antibiotics"
+  ) %>%
+  dplyr::select(-abx_n, -total_n) %>%
+  pivot_wider(names_from = case_type, values_from = n, values_fill = "0 (0.00%)")
+
+# 计算每种病例下开抗生素比例
+case_totals <- prescription_rate_data %>%
+  filter(!is.na(antibiotic_prescribed)) %>%
+  group_by(case_type) %>%
+  summarise(
+    total_n = n(),
+    abx_n = sum(antibiotic_prescribed == 1),
+    .groups = "drop"
+  ) %>%
+  complete(case_type = all_case_types, fill = list(total_n = 0, abx_n = 0))
+
+case_cols_total <- case_totals %>%
+  mutate(
+    text = paste0(abx_n, " (", ifelse(total_n == 0, "NA", sprintf("%.2f", abx_n / total_n * 100)), "%)")
+  ) %>%
+  dplyr::select(case_type, text) %>%
+  deframe()
+
+total_summary <- tibble(
+  特征类型 = "总体汇总",
+  特征名称 = "全部样本",
+  总样本数 = paste0(total_n, " (100%)"),
+  开抗生素数 = paste0(abx_n, " (", sprintf("%.2f", abx_n / total_n * 100), "%)")
+)
+
+for (case_name in names(case_cols_total)) {
+  total_summary[[case_name]] <- case_cols_total[[case_name]]
+}
+
+# 统一空字段列
+fill_cols <- setdiff(names(total_summary), c("特征类型", "特征名称"))
+for (col in fill_cols) {
+  if (!col %in% names(overall_visit_row)) {
+    overall_visit_row[[col]] <- ""
+    overall_abx_row[[col]] <- ""
+  }
+}
+
+# 将病例列统一转换为字符型（character）
+cols_to_fix <- intersect(names(overall_visit_row), names(total_summary))
+overall_visit_row[cols_to_fix] <- lapply(overall_visit_row[cols_to_fix], as.character)
+overall_abx_row[cols_to_fix] <- lapply(overall_abx_row[cols_to_fix], as.character)
+
+# 加入总体汇总前两行
+summary_block <- bind_rows(overall_visit_row, overall_abx_row, total_summary)
+
+# 各子组分析
+for (group_label in names(group_vars)) {
+  var <- group_vars[[group_label]]
+
+  chisq_result <- tryCatch({
+    tbl <- table(prescription_rate_data[[var]], prescription_rate_data$antibiotic_prescribed)
+    expected <- suppressWarnings(chisq.test(tbl)$expected)
+    if (all(expected >= 1) && mean(expected >= 5) >= 0.8) {
+      test <- chisq.test(tbl)
+      list(p = test$p.value, method = "Chi-squared", statistic = round(test$statistic, 2))
+    } else {
+      test <- fisher.test(tbl)
+      list(p = test$p.value, method = "Fisher", statistic = if (!is.null(test$estimate)) round(test$estimate, 2) else NA)
+    }
+  }, error = function(e) list(p = NA, method = "Error", statistic = NA))
+
+  sig_label <- case_when(
+    is.na(chisq_result$p) ~ "",
+    chisq_result$p < 0.001 ~ "***",
+    chisq_result$p < 0.01 ~ "**",
+    chisq_result$p < 0.05 ~ "*",
+    TRUE ~ ""
+  )
+
+  formatted_p <- if (!is.na(chisq_result$p)) formatC(chisq_result$p, format = "f", digits = 4) else NA
+
+  total_df <- prescription_rate_data %>%
+    filter(!is.na(antibiotic_prescribed), !is.na(.data[[var]])) %>%
+    group_by(group = as.character(.data[[var]])) %>%
+    summarise(
+      total_n = n(),
+      abx_n = sum(antibiotic_prescribed == 1),
+      .groups = "drop"
+    )
+
+  case_df <- prescription_rate_data %>%
+    filter(!is.na(antibiotic_prescribed), !is.na(.data[[var]])) %>%
+    group_by(group = as.character(.data[[var]]), case_type) %>%
+    summarise(
+      case_total = n(),
+      abx_n = sum(antibiotic_prescribed == 1),
+      .groups = "drop"
+    ) %>%
+    complete(group, case_type = all_case_types, fill = list(case_total = 0, abx_n = 0)) %>%
+    mutate(
+      cell = paste0(abx_n, " (", ifelse(case_total == 0, "NA", sprintf("%.2f", abx_n / case_total * 100)), "%)")
+    ) %>%
+    dplyr::select(group, case_type, cell) %>%
+    pivot_wider(names_from = case_type, values_from = cell, values_fill = "0 (0.00%)")
+
+  combined <- total_df %>%
+    left_join(case_df, by = "group") %>%
+    mutate(
+      总样本数 = paste0(total_n, " (100%)"),
+      开抗生素数 = paste0(abx_n, " (", sprintf("%.2f", abx_n / total_n * 100), "%)")
+    )
+
+  combined <- combined %>%
+    dplyr::select(-total_n, -abx_n) %>%
+    mutate(
+      特征类型 = group_label,
+      p值 = formatted_p,
+      显著性 = sig_label,
+      检验方法 = chisq_result$method,
+      统计值 = chisq_result$statistic
+    ) %>%
+    rename(特征名称 = group) %>%
+    dplyr::select(特征类型, 特征名称, everything())
+
+  results_list[[group_label]] <- combined
+}
+
+# 合并所有
+final_table <- bind_rows(results_list)
+final_table_with_total <- bind_rows(summary_block, final_table)
+
+# 保存文件
+output_filename_csv <- paste0("抗生素处方统计表-", format(Sys.Date(), "%Y%m%d"), ".csv")
+write.csv(final_table_with_total, file = output_filename_csv, row.names = FALSE)
+
+cat("✅ 导出完成，文件名为：", output_filename_csv, "\n")
+
+
+
+
+```
+
+注意输出的表，doctor_female1和doctor_age是有缺失值的，缺4个
+
+
+
+
+
+```{r}
+
+library(dplyr)
+library(tidyr)
+library(openxlsx)
+
+# 所有病例类型
+all_case_types <- c(
+  "偏头痛", "压力性尿失禁", "哮喘", "小儿腹泻", "心绞痛",
+  "普通感冒", "糖尿病", "胃炎", "腰背痛", "高血压", "产后抑郁"
+)
+
+# 添加 SP 年龄分组
+prescription_rate_data <- prescription_rate_data %>%
+  mutate(sp_age_group = case_when(
+    sp_age < 30 ~ "<30岁",
+    sp_age >= 30 & sp_age < 50 ~ "30-49岁",
+    sp_age >= 50 ~ "≥50岁",
+    TRUE ~ NA_character_
+  ))
+
+# 分组变量列表
+group_vars <- list(
+  "省份" = "province",
+  "城乡类型" = "rural_type",
+  "公私立" = "management_type",
+  "医生年龄" = "doctor_age",
+  "医生性别" = "doctor_female",
+  "SP性别" = "sp_gender",
+  "SP年龄" = "sp_age_group"
+)
+
+results_list <- list()
+
+# 总体样本数与抗生素处方数
+total_n <- prescription_rate_data %>%
+  filter(!is.na(antibiotic_prescribed)) %>% nrow()
+
+abx_n <- prescription_rate_data %>%
+  filter(antibiotic_prescribed == 1) %>% nrow()
+
+# 每种病例的访问数（分母）
+case_visits <- prescription_rate_data %>%
+  group_by(case_type) %>%
+  summarise(visit_n = n(), .groups = "drop") %>%
+  complete(case_type = all_case_types, fill = list(visit_n = 0))
+
+# 每种病例的抗生素处方数（分子）
+case_abx <- prescription_rate_data %>%
+  filter(antibiotic_prescribed == 1) %>%
+  group_by(case_type) %>%
+  summarise(abx_n = n(), .groups = "drop") %>%
+  complete(case_type = all_case_types, fill = list(abx_n = 0))
+
+# 计算抗生素处方比例
+case_summary <- left_join(case_abx, case_visits, by = "case_type") %>%
+  mutate(
+    abx_text = ifelse(visit_n == 0, "0 (0%)",
+                      paste0(abx_n, " (", round(abx_n / visit_n * 100, 1), "%)")),
+    visit_text = paste0(visit_n, " (", round(visit_n / total_n * 100, 1), "%)")
+  )
+
+# 构建 Overall Summary 行
+total_summary <- tibble(
+  特征类型 = "总体汇总",
+  特征名称 = "全部样本",
+  总样本数 = paste0(total_n, " (100%)"),
+  开抗生素数 = paste0(abx_n, " (", round(abx_n / total_n * 100, 1), "%)")
+)
+for (i in seq_along(all_case_types)) {
+  total_summary[[all_case_types[i]]] <- case_summary$abx_text[i]
+}
+
+# 构建 Over Visit 行
+visit_summary <- tibble(
+  特征类型 = "访问次数",
+  特征名称 = "全部样本",
+  总样本数 = paste0(total_n, " (100%)"),
+  开抗生素数 = ""  # 不显示这列
+)
+for (i in seq_along(all_case_types)) {
+  visit_summary[[all_case_types[i]]] <- case_summary$visit_text[i]
+}
+
+# 组合成顶部两行
+header_summary <- bind_rows(total_summary, visit_summary)
+
+# 主循环：每个特征变量
+for (group_label in names(group_vars)) {
+  var <- group_vars[[group_label]]
+
+  chisq_result <- tryCatch({
+    tbl <- table(prescription_rate_data[[var]], prescription_rate_data$antibiotic_prescribed)
+    expected <- suppressWarnings(chisq.test(tbl)$expected)
+
+    if (all(expected >= 1) && mean(expected >= 5) >= 0.8) {
+      test <- chisq.test(tbl)
+      list(p = test$p.value, method = "Chi-squared", statistic = round(as.numeric(test$statistic), 2))
+    } else {
+      test <- fisher.test(tbl)
+      list(p = test$p.value, method = "Fisher", statistic = if (!is.null(test$estimate)) round(as.numeric(test$estimate), 2) else NA)
+    }
+  }, error = function(e) list(p = NA, method = "Error", statistic = NA))
+
+  sig_label <- case_when(
+    is.na(chisq_result$p) ~ "",
+    chisq_result$p < 0.001 ~ "***",
+    chisq_result$p < 0.01 ~ "**",
+    chisq_result$p < 0.05 ~ "*",
+    TRUE ~ ""
+  )
+  formatted_p <- if (!is.na(chisq_result$p)) formatC(chisq_result$p, format = "f", digits = 4) else NA
+
+  total_df <- prescription_rate_data %>%
+    filter(!is.na(antibiotic_prescribed), !is.na(.data[[var]])) %>%
+    group_by(group = as.character(.data[[var]])) %>%
+    summarise(
+      total_n = n(),
+      abx_n = sum(antibiotic_prescribed == 1),
+      .groups = "drop"
+    )
+
+  case_df <- prescription_rate_data %>%
+    filter(!is.na(antibiotic_prescribed), antibiotic_prescribed == 1, !is.na(.data[[var]])) %>%
+    group_by(group = as.character(.data[[var]]), case_type) %>%
+    summarise(n = n(), .groups = "drop") %>%
+    complete(group, case_type = all_case_types, fill = list(n = 0)) %>%
+    pivot_wider(names_from = case_type, values_from = n, values_fill = 0)
+
+  combined <- total_df %>%
+    left_join(case_df, by = "group") %>%
+    mutate(
+      总样本数 = paste0(total_n, " (100%)"),
+      开抗生素数 = paste0(abx_n, " (", round(abx_n / total_n * 100, 1), "%)")
+    )
+
+  case_cols <- setdiff(names(combined), c("group", "total_n", "abx_n", "总样本数", "开抗生素数"))
+  for (col in case_cols) {
+    combined[[col]] <- paste0(
+      combined[[col]], " (",
+      round(as.numeric(combined[[col]]) / combined$total_n * 100, 1), "%)"
+    )
+  }
+
+  combined <- combined %>%
+    dplyr::select(-total_n, -abx_n) %>%
+    mutate(
+      特征类型 = group_label,
+      p值 = formatted_p,
+      显著性 = sig_label,
+      检验方法 = chisq_result$method,
+      统计值 = chisq_result$statistic
+    ) %>%
+    rename(特征名称 = group) %>%
+    dplyr::select(特征类型, 特征名称, dplyr::everything())
+
+  results_list[[group_label]] <- combined
+}
+
+# 最终合并所有结果
+final_table <- bind_rows(results_list)
+final_table_all <- bind_rows(header_summary, final_table)
+
+# 输出文件名
+output_filename_csv <- paste0("抗生素处方统计表0623-", format(Sys.Date(), "%Y%m%d"), ".csv")
+write.csv(final_table_all, file = output_filename_csv, row.names = FALSE)
+
+cat("✅ 导出完成，文件名为：", output_filename_csv, "\n")
+
+
+
+
+```
+
+
+```{r}
+
+library(dplyr)
+
+case_visits <- tmp %>%
+  count(case_name, name = "访问次数") %>%
+  arrange(desc(访问次数))
+
+print(case_visits)
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+##### 按省份/机构类型分层的缺失值
+```{r}
+
+# 找出province、rural_type 或 management_type 缺失的记录
+library(dplyr)
+
+missing_info <- prescription_rate_data %>%
+  filter(is.na(province) | is.na(rural_type) | is.na(management_type)) %>%
+  dplyr::select(record_id, province, rural_type, management_type, antibiotic_prescribed)
+
+
+# 打印结果
+print(missing_info)
+
+
+
+
+
+
+
+```
+
+
+
+
+
+
+
+
+
+### 基于疾病的处方率
+
+```{r}
+
+prescription_rate_data %>%
+  group_by(case_type) %>%
+  summarise(
+    n = n(),
+    prescription_rate = mean(antibiotic_prescribed == "1", na.rm = TRUE)
+  ) %>%
+  arrange(desc(prescription_rate)) %>%
+  kable(digits = 3, caption = "表4：按疾病类型分层抗生素处方率") %>%
+  kable_styling(full_width = FALSE)
+
+
+
+```
+
+
+
+
+
+
+
+### 处方的抗菌药物分布
+#### 基药目录
+```{r}
+
+
+abx_1 <- prescription_rate_data %>%
+  filter(!is.na(antibiotic_1)) %>%
+  transmute(record_id = record_id, essential = as.character(essential_medicine_1))
+
+abx_2 <- prescription_rate_data %>%
+  filter(!is.na(antibiotic_2)) %>%
+  transmute(record_id = record_id, essential = as.character(essential_medicine_2))
+
+abx_all <- bind_rows(abx_1, abx_2)
+
+# 输出分布表
+abx_all %>%
+  group_by(essential) %>%
+  summarise(count = n()) %>%
+  mutate(percentage = count / sum(count)) %>%
+  kable(digits = 3, caption = "表5a：抗菌药物基药目录分布") %>%
+  kable_styling(full_width = FALSE)
+
+
+
+
+
+
+
+```
+
+两个是NA，因为药品名称只是记录为头孢，没法判断具体是哪个药品，所以基药设置为`NA`。
+
+
+
+
+
+
+
+
+
+
+#### AWaRe 分类分布
+```{r}
+
+library(dplyr)
+library(knitr)
+library(kableExtra)
+library(stringr)
+
+abx_1 <- prescription_rate_data %>%
+  filter(!is.na(antibiotic_1)) %>%
+  transmute(AWaRe = AWaRe_1)
+
+abx_2 <- prescription_rate_data %>%
+  filter(!is.na(antibiotic_2)) %>%
+  transmute(AWaRe = AWaRe_2)
+
+abx_all <- bind_rows(abx_1, abx_2)
+
+abx_all %>%
+  mutate(AWaRe = str_to_title(AWaRe)) %>%  # 统一成 Access/Watch/Reserve
+  group_by(AWaRe) %>%
+  summarise(count = n(), .groups = "drop") %>%
+  mutate(percentage = count / sum(count)) %>%
+  kable(digits = 3, caption = "表5b：抗菌药物AWaRe目录分布") %>%
+  kable_styling(full_width = FALSE)
+
+
+
+
+# 合并 antibiotic_1 和 antibiotic_2 的 AWaRe 分类及 record_id
+abx_cleaned <- prescription_rate_data %>%
+  dplyr::select(record_id, AWaRe_1, AWaRe_2) %>%
+  pivot_longer(cols = c(AWaRe_1, AWaRe_2), names_to = "source", values_to = "AWaRe_raw") %>%
+  filter(!is.na(AWaRe_raw)) %>%
+  mutate(
+    AWaRe_clean = case_when(
+      str_to_lower(AWaRe_raw) %in% c("access", "acess") ~ "Access",
+      str_to_lower(AWaRe_raw) %in% c("watch", "wacth") ~ "Watch",
+      str_to_lower(AWaRe_raw) == "reserve" ~ "Reserve",
+      TRUE ~ "Other"
+    )
+  )
+
+# 查看清洗后的结果
+abx_cleaned %>%
+  head()
+
+
+
+
+
+
+```
+
+两个是NA，因为药品名称只是记录为头孢，没法判断具体是哪个药品，所以基药设置为`NA`。
+
+
+
+
+
+#### Table 3 AWare分类
+```{r}
+
+library(dplyr)
+library(stringr)
+library(tidyr)
+library(openxlsx)
+
+# 函数：计算每个case的AWaRe分类频数与比例
+summarise_aware_by_case <- function(data) {
+  data_clean <- data %>%
+    mutate(
+      AWaRe_1 = str_to_title(AWaRe_1),
+      AWaRe_2 = str_to_title(AWaRe_2)
+    )
+
+  # 合并 antibiotic_1 和 2
+  aware_1 <- data_clean %>%
+    filter(!is.na(antibiotic_1)) %>%
+    mutate(AWaRe = AWaRe_1) %>%
+    dplyr::select(case_type, AWaRe)
+
+  aware_2 <- data_clean %>%
+    filter(!is.na(antibiotic_2)) %>%
+    mutate(AWaRe = AWaRe_2) %>%
+    dplyr::select(case_type, AWaRe)
+
+  aware_all <- bind_rows(aware_1, aware_2) %>%
+    filter(AWaRe %in% c("Access", "Watch", "Reserve"))
+
+  result <- aware_all %>%
+    group_by(case_type, AWaRe) %>%
+    summarise(n = n(), .groups = "drop") %>%
+    group_by(case_type) %>%
+    mutate(p = round(n / sum(n), 3),
+           value = paste0(n, " (", sprintf("%.3f", p), ")")) %>%
+    dplyr::select(case_type, AWaRe, value) %>%
+    pivot_wider(names_from = AWaRe, values_from = value, values_fill = "0 (0.000)") %>%
+    arrange(case_type)
+
+  return(result)
+}
+
+# 运行主函数
+aware_summary <- summarise_aware_by_case(prescription_rate_data)
+
+# 保存结果为 Excel
+time_str <- format(Sys.time(), "%Y%m%d_%H%M%S")
+filename <- paste0("AWaRe_Case_Summary_", time_str, ".xlsx")
+
+wb <- createWorkbook()
+addWorksheet(wb, "AWaRe_Summary")
+writeData(wb, "AWaRe_Summary", aware_summary)
+saveWorkbook(wb, filename, overwrite = TRUE)
+
+message("汇总表已保存：", filename)
+
+
+
+
+
+```
+
+
+
+
+
+
+#### Table 3 AWare分类（备选，因为不同特征有缺失值，有缺失值的地方数值是0）
+
+```{r}
+
+library(dplyr)
+library(tidyr)
+library(openxlsx)
+library(stringr)
+
+# 定义完整的特征-水平组合全集
+feature_level_full <- tribble(
+  ~特征, ~水平,
+  "province", "Gansu",
+  "province", "Guangdong",
+  "province", "Guizhou",
+  "province", "Hunan",
+  "province", "InnerMongolia",
+  "province", "Shaanx",
+  "province", "Sichuan",
+  "doctor_age", "30-50",
+  "doctor_age", "<30",
+  "doctor_age", "≥50",
+  "doctor_female", "女",
+  "doctor_female", "男",
+  "ownership_type", "私立",
+  "ownership_type", "公立",
+  "rural_type", "urban",
+  "rural_type", "rural",
+  "management_type", "非营利性",
+  "management_type", "营利性",
+  "sp_gender", "女",
+  "sp_gender", "男",
+  "sp_age_group", "30-50",
+  "sp_age_group", "≥50"
+)
+
+group_vars <- c("province", "doctor_age", "doctor_female",
+                "ownership_type", "rural_type", "management_type", "sp_gender")
+
+generate_aware_table <- function(data, case) {
+  data_case <- data %>% filter(case_type == case)
+
+  # 清洗变量
+  data_case <- data_case %>%
+    mutate(
+      doctor_age = case_when(
+        doctor_age == "1" ~ "<30",
+        doctor_age == "2" ~ "30-50",
+        doctor_age == "3" ~ "≥50",
+        TRUE ~ as.character(doctor_age)
+      ),
+      sp_age_group = case_when(
+        sp_age < 30 ~ "<30",
+        sp_age >= 30 & sp_age <= 50 ~ "30-50",
+        sp_age > 50 ~ "≥50",
+        TRUE ~ NA_character_
+      ),
+      doctor_female = case_when(
+        doctor_female == 0 ~ "男",
+        doctor_female == 1 ~ "女",
+        TRUE ~ as.character(doctor_female)
+      ),
+      sp_gender = as.character(sp_gender)
+    )
+
+  # 合并 antibiotic_1 和 antibiotic_2
+  aware_1 <- data_case %>%
+    filter(!is.na(antibiotic_1)) %>%
+    mutate(AWaRe = AWaRe_1) %>%
+    dplyr::select(all_of(group_vars), sp_age_group, AWaRe)
+
+  aware_2 <- data_case %>%
+    filter(!is.na(antibiotic_2)) %>%
+    mutate(AWaRe = AWaRe_2) %>%
+    dplyr::select(all_of(group_vars), sp_age_group, AWaRe)
+
+  aware_all <- bind_rows(aware_1, aware_2) %>%
+    mutate(AWaRe = case_when(
+      str_to_lower(AWaRe) == "access" ~ "Access",
+      str_to_lower(AWaRe) == "watch" ~ "Watch",
+      str_to_lower(AWaRe) == "reserve" ~ "Reserve",
+      TRUE ~ NA_character_
+    ))
+
+  if (nrow(aware_all) == 0) {
+    message(paste0("Case '", case, "' 中无有效数据，跳过生成表格"))
+    return(NULL)
+  }
+
+  all_aware_levels <- c("Access", "Watch", "Reserve")
+  total_n <- aware_all %>% filter(!is.na(AWaRe)) %>% nrow()
+
+  result_df <- data.frame()
+
+  for (feature_name in c(group_vars, "sp_age_group")) {
+    tmp_df <- aware_all %>%
+      filter(!is.na(.data[[feature_name]]), !is.na(AWaRe)) %>%
+      group_by(characteristic = feature_name,
+               level = .data[[feature_name]],
+               AWaRe) %>%
+      summarise(n = n(), .groups = "drop") %>%
+      mutate(percentage = round(n / total_n, 3)) %>%
+      complete(characteristic, level, AWaRe = all_aware_levels,
+               fill = list(n = 0, percentage = 0)) %>%
+      mutate(value = paste0(n, " (", sprintf("%.3f", percentage), ")")) %>%
+      dplyr::select(characteristic, level, AWaRe, value) %>%
+      pivot_wider(names_from = AWaRe, values_from = value,
+                  values_fill = "0 (0.000)") %>%
+      arrange(characteristic, level)
+
+    result_df <- bind_rows(result_df, tmp_df)
+  }
+
+  # 命名列
+  colnames(result_df) <- c("特征", "水平", "Access", "Watch", "Reserve")
+
+  # 强制保留所有特征水平
+  result_df <- feature_level_full %>%
+    left_join(result_df, by = c("特征", "水平")) %>%
+    mutate(across(c("Access", "Watch", "Reserve"), ~replace_na(., "0 (0.000)")))
+
+  # 添加总计行
+  aware_summary <- aware_all %>%
+    filter(!is.na(AWaRe)) %>%
+    group_by(AWaRe) %>%
+    summarise(n = n(), .groups = "drop") %>%
+    mutate(percentage = round(n / total_n, 3),
+           value = paste0(n, " (", sprintf("%.3f", percentage), ")")) %>%
+    dplyr::select(AWaRe, value) %>%
+    pivot_wider(names_from = AWaRe, values_from = value) %>%
+    mutate(特征 = "总计", 水平 = "全部")
+
+  for (level in all_aware_levels) {
+    if (!(level %in% colnames(aware_summary))) {
+      aware_summary[[level]] <- "0 (0.000)"
+    }
+  }
+
+  aware_summary <- aware_summary %>% dplyr::select(特征, 水平, all_of(all_aware_levels))
+  result_df <- bind_rows(result_df, aware_summary)
+
+  return(result_df)
+}
+
+# 主流程
+case_list <- unique(prescription_rate_data$case_type)
+result_list <- list()
+
+for (case in case_list) {
+  message("正在处理疾病：", case)
+  df_case <- generate_aware_table(prescription_rate_data, case)
+  if (!is.null(df_case)) {
+    result_list[[case]] <- df_case
+  }
+}
+
+# 保存 Excel
+time_str <- format(Sys.time(), "%Y%m%d_%H%M%S")
+filename <- paste0("AWaRe_Usage_By_Case_", time_str, ".xlsx")
+
+wb <- createWorkbook()
+for (case in names(result_list)) {
+  sheet_name <- substr(case, 1, 31)
+  addWorksheet(wb, sheetName = sheet_name)
+  writeData(wb, sheet = sheet_name, result_list[[case]])
+}
+saveWorkbook(wb, file = filename, overwrite = TRUE)
+message(paste0("所有表格已保存到 ", filename))
+
+
+
+
+```
+
+```{r}
+
+generate_AWaRe_table(prescription_rate_data, unique(prescription_rate_data$case_type)[1])
+
+
+
+
+```
+
+
+##### 转成横向堆积图：Fugure 1. Distribution of prescribed antibiotic by WHO AWaRe categories for 11 case at primary healthcare
+
+```{r}
+
+# library(ggplot2)
+# library(dplyr)
+# library(tidyr)
+# library(scales)
+#
+# # 原始数据
+# data <- data.frame(
+#   case_type_cn = c("偏头痛", "压力性尿失禁", "哮喘", "小儿腹泻", "心绞痛", "普通感冒",
+#                    "糖尿病", "胃炎", "腰背痛", "高血压"),
+#   Access = c(5, 6, 19, 6, 8, 48, 1, 27, 5, 6),
+#   Watch = c(4, 9, 25, 0, 1, 46, 4, 6, 3, 4)
+# )
+#
+# case_type_en <- c("Migraine", "Stress Urinary Incontinence", "Asthma", "Pediatric Diarrhea",
+#                   "Angina", "Common Cold", "Diabetes", "Gastritis", "Low Back Pain", "Hypertension")
+# data$case_type <- factor(case_type_en, levels = rev(case_type_en))
+#
+# data <- data %>%
+#   mutate(
+#     Total = Access + Watch,
+#     Access_pct = Access / Total,
+#     Watch_pct = Watch / Total
+#   )
+#
+# plot_data <- data %>%
+#   dplyr::select(case_type, Access, Watch, Access_pct, Watch_pct) %>%
+#   pivot_longer(cols = c(Access, Watch),
+#                names_to = "Category", values_to = "Count") %>%
+#   mutate(
+#     Percent = ifelse(Category == "Access", Access_pct, Watch_pct),
+#     label = ifelse(Percent > 0, paste0(round(Percent * 100, 1), "%"), "")
+#   )
+#
+# # 注意这里调整顺序，先Watch后Access
+# plot_data <- plot_data %>%
+#   group_by(case_type) %>%
+#   arrange(case_type, factor(Category, levels = c("Watch", "Access"))) %>%
+#   mutate(
+#     xmin = cumsum(lag(Percent, default = 0)),
+#     xmax = xmin + Percent,
+#     label_pos = xmin + Percent / 2
+#   ) %>%
+#   ungroup()
+#
+# # 颜色，顺序对应
+# custom_colors <- c("Watch" = "#024B7A", "Access" = "#FFAE49")
+#
+# p <- ggplot(plot_data, aes(x = Percent, y = case_type, fill = Category)) +
+#   geom_bar(stat = "identity", position = "stack") +
+#   geom_text(aes(x = label_pos, label = label), color = "white", size = 4.2) +
+#   scale_fill_manual(values = custom_colors, breaks = c("Watch", "Access")) +  # breaks确定图例顺序
+#   scale_x_continuous(labels = scales::percent_format(accuracy = 1), expand = c(0, 0)) +
+#   labs(
+#     title = "Distribution of Antibiotic Classes by Case Type",
+#     x = "Percentage (%)",
+#     y = "Case Type",
+#     fill = ""
+#   ) +
+#   theme_minimal(base_size = 14) +
+#   theme(legend.position = "bottom")
+#
+# ggsave(
+#   plot = p,
+#   filename = "antibiotic_distribution.pdf",
+#   width = 10,
+#   height = 6,
+#   dpi = 400,
+#   units = "in"
+# )
+
+
+
+
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(scales)
+
+# 原始数据
+data <- data.frame(
+  case_type_cn = c("偏头痛", "压力性尿失禁", "哮喘", "小儿腹泻", "心绞痛", "普通感冒",
+                   "糖尿病", "胃炎", "腰背痛", "高血压"),
+  Access = c(5, 6, 19, 6, 8, 48, 1, 27, 5, 6),
+  Watch = c(4, 9, 25, 0, 1, 46, 4, 6, 3, 4)
+)
+
+case_type_en <- c("Migraine", "Stress Urinary Incontinence", "Asthma", "Pediatric Diarrhea",
+                  "Angina", "Common Cold", "Diabetes", "Gastritis", "Low Back Pain", "Hypertension")
+data$case_type <- factor(case_type_en, levels = rev(case_type_en))
+
+data <- data %>%
+  mutate(
+    Total = Access + Watch,
+    Access_pct = Access / Total,
+    Watch_pct = Watch / Total
+  )
+
+plot_data <- data %>%
+  dplyr::select(case_type, Access, Watch, Access_pct, Watch_pct) %>%
+  pivot_longer(cols = c(Access, Watch),
+               names_to = "Category", values_to = "Count") %>%
+  mutate(
+    Percent = ifelse(Category == "Access", Access_pct, Watch_pct),
+    label = ifelse(Percent > 0, paste0(round(Percent * 100, 1), "%"), "")
+  )
+
+# 注意这里调整顺序，先Watch后Access
+plot_data <- plot_data %>%
+  group_by(case_type) %>%
+  arrange(case_type, factor(Category, levels = c("Watch", "Access"))) %>%
+  mutate(
+    xmin = cumsum(lag(Percent, default = 0)),
+    xmax = xmin + Percent,
+    label_pos = xmin + Percent / 2
+  ) %>%
+  ungroup()
+
+# 颜色，顺序对应
+custom_colors <- c("Watch" = "#1C366A", "Access" = "#AF060F")
+
+p <- ggplot(plot_data, aes(x = Percent, y = case_type, fill = Category)) +
+  geom_bar(stat = "identity", position = "stack") +
+  geom_text(aes(x = label_pos, label = label), color = "white", size = 4.2) +
+  scale_fill_manual(values = custom_colors, breaks = c("Watch", "Access")) +  # breaks确定图例顺序
+  scale_x_continuous(labels = scales::percent_format(accuracy = 1), expand = c(0, 0)) +
+  labs(
+    title = "Distribution of Antibiotic Classes by Case Type",
+    x = "Percentage (%)",
+    y = "Case Type",
+    fill = ""
+  ) +
+  theme_minimal(base_size = 16) +
+  theme(legend.position = "bottom")
+
+ggsave(
+  plot = p,
+  filename = "antibiotic_distribution.pdf",
+  width = 14,
+  height = 6,
+  dpi = 400,
+  units = "in"
+)
+
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+#### Table 4 ATC分类
+
+
+
+```{r}
+
+
+library(dplyr)
+library(tidyr)
+library(stringr)
+
+# Step 1: 整理数据为长格式
+atc_long <- prescription_rate_data %>%
+  dplyr::select(case_type, ATC_1, ATC_2) %>%
+  pivot_longer(cols = c(ATC_1, ATC_2), values_to = "ATC") %>%
+  filter(!is.na(ATC))
+
+# Step 2: 各 case_type 总抗生素数
+case_totals <- atc_long %>%
+  count(case_type, name = "total")
+
+# Step 3: 各 ATC × case_type 的频数 + 比例
+atc_summary <- atc_long %>%
+  group_by(case_type, ATC) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  left_join(case_totals, by = "case_type") %>%
+  mutate(
+    p = round(n / total * 100, 1),
+    cell = paste0(n, " (", p, "%)")
+  ) %>%
+  dplyr::select(ATC, case_type, cell)
+
+# Step 4: 补全所有组合
+all_cases <- unique(prescription_rate_data$case_type)
+all_atcs <- unique(c(prescription_rate_data$ATC_1, prescription_rate_data$ATC_2)) %>% na.omit()
+
+complete_table <- expand.grid(
+  ATC = all_atcs,
+  case_type = all_cases,
+  stringsAsFactors = FALSE
+) %>%
+  left_join(atc_summary, by = c("ATC", "case_type")) %>%
+  mutate(cell = replace_na(cell, "0 (0.0%)"))
+
+# ✅ Step 5: 计算每个 ATC 的总计列
+total_by_atc <- atc_long %>%
+  group_by(ATC) %>%
+  summarise(n = n(), .groups = "drop") %>%
+  mutate(
+    p = round(n / sum(n) * 100, 1),
+    `总计` = paste0(n, " (", p, "%)")
+  ) %>%
+  dplyr::select(ATC, 总计)
+
+# Step 6: 转宽表（ATC × case_type）
+wide_table <- complete_table %>%
+  pivot_wider(names_from = case_type, values_from = cell) %>%
+  left_join(total_by_atc, by = "ATC") %>%
+  relocate(总计, .after = ATC) %>%  # ✅ 把总计列移到疾病前
+  arrange(ATC)
+
+# Step 7: 添加 Total 行（按病例类型总数）
+total_row <- case_totals %>%
+  mutate(
+    cell = paste0(total, " (100.0%)")
+  ) %>%
+  dplyr::select(case_type, cell) %>%
+  pivot_wider(names_from = case_type, values_from = cell) %>%
+  mutate(
+    ATC = "Total",
+    总计 = paste0(sum(case_totals$total), " (100.0%)")
+  ) %>%
+  dplyr::select(ATC, 总计, everything())
+
+# Step 8: 合并最终表格
+final_table <- bind_rows(wide_table, total_row)
+
+# 查看前几行结果
+print(head(final_table))
+
+# Step 9: 导出为 CSV（可选）
+write.csv(final_table, "ATC_by_case_type_with_total_column.csv", row.names = FALSE)
+
+
+write.csv(prescription_rate_data, "prescription_rate_data.csv", row.names = FALSE)
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+#### Table 5 基药分类
+
+
+
+```{r}
+
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(stringr)
+library(openxlsx)
+
+# 读数据
+df <- read_excel("data/essentialmedicine.xlsx")
+
+# 转字符
+df <- df %>%
+  mutate(
+    essential_medicine_1 = as.character(essential_medicine_1),
+    essential_medicine_2 = as.character(essential_medicine_2)
+  )
+
+# 长格式合并两列
+essential_long <- df %>%
+  pivot_longer(
+    cols = c(essential_medicine_1, essential_medicine_2),
+    names_to = "med_order",
+    values_to = "essential"
+  )
+
+# 只保留0和1
+essential_filtered <- essential_long %>%
+  filter(essential %in% c("0", "1"))
+
+# 统计每个 case_type 和 essential 的数量
+count_df <- essential_filtered %>%
+  group_by(case_type, essential) %>%
+  summarise(count = n(), .groups = "drop")
+
+# 计算每个 case_type 的总数
+total_df <- count_df %>%
+  group_by(case_type) %>%
+  summarise(total = sum(count), .groups = "drop")
+
+# 合并总数并计算百分比
+count_df <- count_df %>%
+  left_join(total_df, by = "case_type") %>%
+  mutate(
+    percent = sprintf("%.1f%%", count / total * 100),
+    cell = paste0(count, " (", percent, ")")
+  )
+
+# 创建总计列（所有 case_type 的合并）
+summary_total <- count_df %>%
+  group_by(essential) %>%
+  summarise(
+    count = sum(count),
+    total = sum(total),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    percent = sprintf("%.1f%%", count / total * 100),
+    总计 = paste0(count, " (", percent, ")")
+  ) %>%
+  dplyr::select(essential, 总计)
+
+# 转宽格式表（按病例分列）
+wide_df <- count_df %>%
+  dplyr::select(case_type, essential, cell) %>%
+  pivot_wider(
+    names_from = case_type,
+    values_from = cell,
+    values_fill = "0 (0.0%)"
+  ) %>%
+  left_join(summary_total, by = "essential") %>%
+  relocate(总计, .after = essential) %>%  # 将“总计”列放在病例最前面
+  rename(`基药使用情况` = essential)
+
+# 添加合计行（每列合计）
+total_row <- total_df %>%
+  mutate(
+    cell = paste0(total, " (100%)"),
+    essential = "合计"
+  ) %>%
+  dplyr::select(case_type, essential, cell) %>%
+  pivot_wider(
+    names_from = case_type,
+    values_from = cell
+  )
+
+# 添加总计列的合计
+total_count <- sum(total_df$total)
+total_row <- total_row %>%
+  mutate(
+    总计 = paste0(total_count, " (100%)"),
+    `基药使用情况` = "合计"
+  ) %>%
+  dplyr::select(`基药使用情况`, 总计, everything())
+
+# 合并表格
+final_df <- bind_rows(wide_df, total_row)
+
+# 行排序
+final_df$`基药使用情况` <- factor(final_df$`基药使用情况`, levels = c("0", "1", "合计"))
+final_df <- final_df %>% arrange(`基药使用情况`)
+
+# 输出
+print(final_df)
+
+# 导出Excel
+time_str <- format(Sys.time(), "%Y%m%d_%H%M%S")
+filename <- paste0("基药统计_含列合计_", time_str, ".xlsx")
+write.xlsx(final_df, file = filename, rowNames = FALSE)
+message("导出文件：", filename)
+
+
+
+
+```
+
+
+
+
+
+
+#### ATC分布
+
+
+这个表格的 行是 ATC 编码，列是疾病类型（case_type），单元格是该 ATC 在该疾病中的使用比例，即：
+
+比例=该疾病中该ATC出现次数 / 该疾病中所有ATC出现总次数
+
+
+
+```{r}
+
+library(dplyr)
+library(tidyr)
+library(knitr)
+library(kableExtra)
+
+# 1. 提取 antibiotic_1 和 antibiotic_2 的 case_type 与 ATC
+abx_1 <- prescription_rate_data %>%
+  dplyr::filter(!is.na(antibiotic_1)) %>%
+  dplyr::rename(ATC = ATC_1) %>%
+  dplyr::select(case_type, ATC)
+
+abx_2 <- prescription_rate_data %>%
+  dplyr::filter(!is.na(antibiotic_2)) %>%
+  dplyr::rename(ATC = ATC_2) %>%
+  dplyr::select(case_type, ATC)
+
+# 2. 合并
+abx_all <- dplyr::bind_rows(abx_1, abx_2) %>%
+  dplyr::filter(!is.na(ATC), !is.na(case_type))
+
+# 3. 计算每种疾病每个ATC的数量
+atc_case_count <- abx_all %>%
+  dplyr::group_by(case_type, ATC) %>%
+  dplyr::summarise(count = dplyr::n(), .groups = "drop")
+
+# 4. 计算每种疾病的总抗生素数量，用于比例计算
+case_totals <- atc_case_count %>%
+  dplyr::group_by(case_type) %>%
+  dplyr::summarise(total = sum(count), .groups = "drop")
+
+# 5. 合并数量与总数，计算比例
+atc_case_stats <- atc_case_count %>%
+  dplyr::left_join(case_totals, by = "case_type") %>%
+  dplyr::mutate(proportion = count / total) %>%
+  dplyr::select(case_type, ATC, count, proportion)
+
+# 6. 格式化单元格，合并count和proportion
+atc_case_stats <- atc_case_stats %>%
+  dplyr::mutate(count_prop = paste0(count, " (", sprintf("%.3f", proportion), ")"))
+
+# 7. 转成宽格式，行是ATC，列是疾病，内容是“数量 (比例)”
+atc_case_wide <- atc_case_stats %>%
+  dplyr::select(case_type, ATC, count_prop) %>%
+  tidyr::pivot_wider(names_from = case_type, values_from = count_prop, values_fill = "0 (0.000)")
+
+# 8. 输出表格
+atc_case_wide %>%
+  knitr::kable(caption = "ATC 编码在各疾病类型中的数量与比例（count (proportion)）") %>%
+  kableExtra::kable_styling(full_width = TRUE)
+
+
+
+
+# 生成带有当前日期的文件名
+output_filename <- paste("ATC-", format(Sys.time(), "%Y-%m-%d"), ".xlsx", sep = "")
+
+# 保存Excel文件，并包含日期格式的文件名
+write.xlsx(atc_case_wide, file = output_filename)
+
+rm(output_filename)
+
+
+
+
+
+
+
+```
+
+
+
+```{r}
+
+library(dplyr)
+library(tidyr)
+library(knitr)
+library(kableExtra)
+library(openxlsx)
+
+# 1. 提取 antibiotic_1 和 antibiotic_2 的 case_type 与 ATC
+abx_1 <- prescription_rate_data %>%
+  dplyr::filter(!is.na(antibiotic_1)) %>%
+  dplyr::rename(ATC = ATC_1) %>%
+  dplyr::select(case_type, ATC)
+
+abx_2 <- prescription_rate_data %>%
+  dplyr::filter(!is.na(antibiotic_2)) %>%
+  dplyr::rename(ATC = ATC_2) %>%
+  dplyr::select(case_type, ATC)
+
+# 2. 合并所有抗生素记录
+abx_all <- dplyr::bind_rows(abx_1, abx_2) %>%
+  dplyr::filter(!is.na(ATC), !is.na(case_type))
+
+# 3. 计算每种疾病每个ATC的数量
+atc_case_count <- abx_all %>%
+  dplyr::group_by(case_type, ATC) %>%
+  dplyr::summarise(count = dplyr::n(), .groups = "drop")
+
+# 4. 转为宽格式（行是 ATC，列是 case_type，值为 count）
+atc_case_wide <- atc_case_count %>%
+  tidyr::pivot_wider(
+    names_from = case_type,
+    values_from = count,
+    values_fill = 0
+  )
+
+# 5. 输出表格（可视化预览）
+atc_case_wide %>%
+  knitr::kable(caption = "ATC 编码在各疾病类型中的开药次数") %>%
+  kableExtra::kable_styling(full_width = TRUE)
+
+# 6. 生成带日期的文件名并导出为 Excel
+output_filename <- paste0("ATC2-", format(Sys.time(), "%Y-%m-%d"), ".xlsx")
+write.xlsx(atc_case_wide, file = output_filename)
+
+# 清除变量
+rm(output_filename)
+
+
+
+
+```
+
+
+
+
+
+
+
+
+
+```{r}
+
+
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(forcats)
+library(scales)
+library(colorspace)
+
+# 假设你的数据框名是 atc_case_wide，结构类似：
+#  | ATC     | case_type1 | case_type2 | ... |
+#  |---------|------------|------------|-----|
+#  | J01CA01 | 10         | 5          | ... |
+#  | J01DB02 | 3          | 8          | ... |
+
+# Step 1: 转换数据为长格式
+abx_long <- atc_case_wide %>%
+  pivot_longer(-ATC, names_to = "case_type", values_to = "count") %>%
+  filter(count > 0)
+
+# Step 2: 计算比例
+abx_prop <- abx_long %>%
+  group_by(case_type) %>%
+  mutate(prop = count / sum(count)) %>%
+  ungroup()
+
+# Step 3: 提取ATC类别列表
+atc_list <- sort(unique(abx_prop$ATC))
+
+# Step 4: 生成27个高饱和度颜色
+my_colors <- qualitative_hcl(
+  n = length(atc_list),
+  h = c(0, 360),   # 色调环全覆盖
+  c = 100,         # 饱和度高
+  l = 50           # 亮度适中
+)
+names(my_colors) <- atc_list
+
+# Step 5: 绘图
+ggplot(abx_prop, aes(x = prop, y = fct_rev(case_type), fill = ATC)) +
+  geom_bar(stat = "identity", position = "stack", width = 0.8) +
+  scale_x_continuous(labels = percent_format(accuracy = 1)) +
+  scale_fill_manual(values = my_colors) +
+  labs(
+    title = "各疾病抗生素使用分布（高饱和度配色）",
+    x = "抗生素处方占比",
+    y = "疾病类型",
+    fill = "ATC类别"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "bottom",
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 9),
+    axis.text.x = element_text(size = 12),
+    axis.text.y = element_text(size = 12),
+    panel.grid.major.y = element_blank()
+  )
+
+
+
+
+
+
+
+
+```
+
+
+
+```{r}
+
+
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(forcats)
+library(scales)
+library(colorspace)
+
+# Step 1: 转换数据为长格式
+abx_long <- atc_case_wide %>%
+  pivot_longer(-ATC, names_to = "case_type", values_to = "count") %>%
+  filter(count > 0)
+
+# Step 2: 计算比例
+abx_prop <- abx_long %>%
+  group_by(case_type) %>%
+  mutate(prop = count / sum(count)) %>%
+  ungroup()
+
+# Step 3: 提取ATC类别列表
+atc_list <- sort(unique(abx_prop$ATC))
+
+# Step 4: 使用深色优先生成配色
+set.seed(2025)
+atc_colors <- qualitative_hcl(
+  n = length(atc_list),
+  palette = "Dark 3",     # 强调深色系
+  l = 40,                 # 亮度（l越小越深），默认是 60-80，我们降到 40
+  c = 100                 # 色彩饱和度，100比较高
+)
+names(atc_colors) <- atc_list
+
+# Step 5: 绘图
+ggplot(abx_prop, aes(x = prop, y = fct_rev(case_type), fill = ATC)) +
+  geom_bar(stat = "identity", position = "stack", width = 0.8) +
+  scale_x_continuous(labels = percent_format(accuracy = 1)) +
+  scale_fill_manual(values = atc_colors) +
+  labs(
+    title = "各疾病抗生素使用分布（深色高辨识度配色）",
+    x = "抗生素处方占比",
+    y = "疾病类型",
+    fill = "ATC类别"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    legend.position = "bottom",
+    legend.title = element_text(size = 12),
+    legend.text = element_text(size = 9),
+    axis.text.x = element_text(size = 12),
+    axis.text.y = element_text(size = 12),
+    panel.grid.major.y = element_blank()
+  )
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+### 抗菌药物开设药物处方的满意度
+
+```{r}
+
+library(dplyr)
+
+prescription_rate_data <- prescription_rate_data %>%
+  left_join(
+    qualityresult %>% dplyr::select(record_id, `药事服务满意度`),
+    by = "record_id"
+  )
+
+
+
+```
+
+```{r}
+
+table(prescription_rate_data$`药事服务满意度`, useNA = "always")
+table(prescription_rate_data$antibiotic_prescribed, useNA = "always")
+
+
+```
+
+
+
+
+```{r}
+
+
+library(dplyr)
+
+# 描述性列联表
+table_satisfaction <- prescription_rate_data %>%
+  filter(!is.na(`药事服务满意度`), !is.na(antibiotic_prescribed)) %>%
+  count(antibiotic_prescribed, `药事服务满意度`) %>%
+  group_by(antibiotic_prescribed) %>%
+  mutate(percent = round(100 * n / sum(n), 1))
+
+# 美观输出
+library(tidyr)
+table_satisfaction_wide <- table_satisfaction %>%
+  unite("n_percent", n, percent, sep = " (") %>%
+  mutate(n_percent = paste0(n_percent, "%)")) %>%
+  pivot_wider(names_from = `药事服务满意度`, values_from = n_percent)
+
+# 查看
+print(table_satisfaction_wide)
+
+
+
+```
+
+
+
+
+
+# 徐老师建议文章
+## 抗生素是否是唯一的药，还是有其他联用的药
+文档见 `output_by_case_type.xlsx`
+
+```{r}
+
+library(readxl)
+library(dplyr)
+library(tidyr)
+library(purrr)
+
+file_path <- "antibotic_drug_info_by_cases-2025-06-01.xlsx"
+sheet_names <- excel_sheets(file_path)
+
+process_sheet <- function(sheet_name) {
+  # 读取单个sheet
+  df <- read_excel(file_path, sheet = sheet_name)
+
+  # 标准化列名
+  names(df) <- tolower(trimws(names(df)))
+
+  # 检查必须列
+  required_cols <- c("record_id", "drug_total_fee", "common_name")
+  missing_cols <- setdiff(required_cols, names(df))
+  if (length(missing_cols) > 0) {
+    stop(paste("Sheet", sheet_name, "缺少列:", paste(missing_cols, collapse = ", ")))
+  }
+
+  # 只保留目标列，转换 drug_total_fee 为数值型（若转换失败则为NA）
+  df <- df %>%
+    dplyr::select(record_id, drug_total_fee, common_name) %>%
+    mutate(drug_total_fee = as.numeric(drug_total_fee))
+
+  # 费用聚合：每个record_id取第一个非NA的drug_total_fee，如果全NA则为NA
+  fee_data <- df %>%
+    group_by(record_id) %>%
+    dplyr::summarize(
+      drug_total_fee = if (all(is.na(drug_total_fee))) NA_real_ else first(na.omit(drug_total_fee)),
+      .groups = "drop"
+    )
+
+  # 药品顺序编号（仅对非NA common_name）
+  drug_data <- df %>%
+    group_by(record_id) %>%
+    mutate(drug_order = ifelse(!is.na(common_name), paste0("drug", row_number()), NA_character_)) %>%
+    ungroup()
+
+  # 宽格式转换，药品列
+  drug_wide <- drug_data %>%
+    filter(!is.na(drug_order)) %>%
+    dplyr::select(record_id, drug_order, common_name) %>%
+    pivot_wider(names_from = drug_order, values_from = common_name)
+
+  # 合并费用和药品宽表，并增加case_type列
+  full_data <- fee_data %>%
+    left_join(drug_wide, by = "record_id") %>%
+    mutate(case_type = sheet_name) %>%
+    dplyr::select(record_id, drug_total_fee, case_type, everything())
+
+  return(full_data)
+}
+
+# 对所有sheet处理并合并
+combined_drug_data <- map_dfr(sheet_names, process_sheet)
+
+# 查看结果前几行，检查数据结构
+print(head(combined_drug_data))
+
+
+
+
+
+```
+
+
+
+```{r}
+
+library(writexl)
+
+
+# 假设 final_data 已经加载且有 record_id 列
+
+filtered_data <- combined_drug_data %>%
+  semi_join(final_data %>% dplyr::select(record_id), by = "record_id")
+
+# 查看结果
+print(nrow(filtered_data))  # 应该是2143条左右
+
+
+# combined_drug_data 是你合并的药品数据
+# final_data 是你已有的参考数据框，里面有 record_id 列
+
+filtered_combined_drug_data <- combined_drug_data %>%
+  semi_join(final_data %>% dplyr::select(record_id), by = "record_id")
+
+# 查看前几条
+head(filtered_combined_drug_data)
+
+
+
+
+
+# 获取所有唯一的 case_type
+case_types <- unique(filtered_combined_drug_data$case_type)
+
+# 生成一个命名列表，确保名字和数据对应
+split_list <- lapply(case_types, function(ct) {
+  filtered_combined_drug_data %>% filter(case_type == ct)
+})
+names(split_list) <- case_types
+
+# 写入 Excel，sheet 名就是 case_type
+write_xlsx(split_list, path = "output_by_case_type-11.xlsx")
+
+
+
+
+```
+
+
+
+
+
+### Fugure 2. Distribution of prescribed antibiotic by antibiotic ATC classes for 11 cases at primary healthcare
+
+第一种
+```{r}
+
+library(tidyr)
+library(ggplot2)
+library(forcats)
+library(scales)
+
+# Step 0: Rename Chinese column names to English
+colnames(atc_case_wide) <- c(
+  "ATC",
+  "Migraine",
+  "Stress urinary incontinence",
+  "Asthma",
+  "Pediatric diarrhea",
+  "Angina",
+  "Common cold",
+  "Diabetes",
+  "Gastritis",
+  "Low back pain",
+  "Hypertension"
+)
+
+
+
+# Step 1: Data transformation
+abx_long <- atc_case_wide %>%
+  pivot_longer(-ATC, names_to = "case_type", values_to = "count") %>%
+  filter(count > 0)
+
+# Step 2: Proportion calculation
+abx_prop <- abx_long %>%
+  group_by(case_type) %>%
+  mutate(prop = count / sum(count)) %>%
+  ungroup()
+
+
+# Step 3: Custom color palette with J01CA04 fixed to #8B1A1A
+fixed_color <- "#8B1A1A"
+fixed_atc <- "J01CA04"
+
+# 原始颜色（除去 #8B1A1A）
+colors <- c(
+  "#08306B", "#A1D99B", "#6BAED6", "#FEE391",
+  "#BCBDDC", "#41AB5D", "#A3C6BF", "#FF8C00", "#007FFF",
+  "#E27A6E", "#8BA7BE", "#E3B27E", "#BED877", "#F6C8D4",
+  "#D5D6D6", "#AD91C2", "#B22222", "#FFF6B0", "#509C7A",
+  "#BF642A", "#6E66AF", "#CF2A78", "#7C9A1C", "#D0A62F",
+  "#96772F", "#626262"
+)
+
+# 获取 ATC 列表并移除固定的 ATC
+atc_list <- sort(unique(abx_prop$ATC))
+atc_remaining <- setdiff(atc_list, fixed_atc)
+
+# 检查颜色数量是否匹配
+if (length(atc_remaining) != length(colors)) {
+  stop("剩余 ATC 类别数与颜色数不一致！")
+}
+
+# 拼接颜色映射
+my_colors <- c(fixed_color, colors)
+names(my_colors) <- c(fixed_atc, atc_remaining)
+
+
+
+# Step 4: Plot (larger fonts)
+abx_plot <- ggplot(abx_prop, aes(x = prop, y = fct_rev(case_type), fill = ATC)) +
+  geom_bar(stat = "identity", position = "stack", width = 0.8) +
+  scale_x_continuous(labels = percent_format(accuracy = 1)) +
+  scale_fill_manual(values = my_colors) +
+  labs(
+    title = "Types of antibiotics prescribed for different diagnostic categories",
+    x = "Proportion of antibiotic prescriptions",
+    y = "Diagnostic category",
+    fill = "ATC category"
+  ) +
+  guides(fill = guide_legend(nrow = 3, byrow = TRUE)) +
+  theme_minimal(base_size = 36) +  # 基础字体更大
+  theme(
+    legend.position = "bottom",
+    legend.title = element_text(size = 16),
+    legend.text = element_text(size = 16),
+    legend.key.size = unit(0.5, "cm"),
+    legend.spacing.x = unit(0.4, "cm"),
+    legend.margin = margin(t = 5),
+    axis.text.x = element_text(size = 24),
+    axis.text.y = element_text(size = 24),
+    axis.title = element_text(size = 24),
+    plot.title = element_text(size = 36, face = "bold", hjust = 0.5),
+    panel.grid.major.y = element_blank()
+  )
+
+# Step 5: Save plot
+ggsave(
+  filename = "antibiotic_by_casetype.png",
+  plot = abx_plot,
+  width = 26,   # 宽度保持
+  height = 8,   # 高度增加，更适合大字体
+  dpi = 300
+)
+
+
+
+```
+
+
+
+
+
+第一种
+```{r}
+
+library(tidyr)
+library(ggplot2)
+library(forcats)
+library(scales)
+
+# Step 0: Rename Chinese column names to English
+colnames(atc_case_wide) <- c(
+  "ATC",
+  "Migraine",
+  "Stress urinary incontinence",
+  "Asthma",
+  "Pediatric diarrhea",
+  "Angina",
+  "Common cold",
+  "Diabetes",
+  "Gastritis",
+  "Low back pain",
+  "Hypertension"
+)
+
+
+
+# Step 1: Data transformation
+abx_long <- atc_case_wide %>%
+  pivot_longer(-ATC, names_to = "case_type", values_to = "count") %>%
+  filter(count > 0)
+
+# Step 2: Proportion calculation
+abx_prop <- abx_long %>%
+  group_by(case_type) %>%
+  mutate(prop = count / sum(count)) %>%
+  ungroup()
+
+
+# Step 3: Custom color palette with J01CA04 fixed to #8B1A1A
+fixed_color <- "#8B1A1A"
+fixed_atc <- "J01CA04"
+
+# 原始颜色（除去 #8B1A1A）
+colors <- c(
+  "#08306B", "#A1D99B", "#6BAED6", "#FEE391",
+  "#BCBDDC", "#41AB5D", "#A3C6BF", "#FF8C00", "#007FFF",
+  "#E27A6E", "#8BA7BE", "#E3B27E", "#BED877", "#F6C8D4",
+  "#D5D6D6", "#AD91C2", "#B22222", "#FFF6B0", "#509C7A",
+  "#BF642A", "#6E66AF", "#CF2A78", "#7C9A1C", "#D0A62F",
+  "#96772F", "#626262"
+)
+
+
+
+# 获取 ATC 列表并移除固定的 ATC
+atc_list <- sort(unique(abx_prop$ATC))
+atc_remaining <- setdiff(atc_list, fixed_atc)
+
+# 检查颜色数量是否匹配
+if (length(atc_remaining) != length(colors)) {
+  stop("剩余 ATC 类别数与颜色数不一致！")
+}
+
+# 拼接颜色映射
+my_colors <- c(fixed_color, colors)
+names(my_colors) <- c(fixed_atc, atc_remaining)
+
+
+
+# Step 4: Plot (larger fonts)
+abx_plot <- ggplot(abx_prop, aes(x = prop, y = fct_rev(case_type), fill = ATC)) +
+  geom_bar(stat = "identity", position = "stack", width = 0.8) +
+  scale_x_continuous(labels = percent_format(accuracy = 1)) +
+  scale_fill_manual(values = my_colors) +
+  labs(
+    title = "Types of antibiotics prescribed for different diagnostic categories",
+    x = "Proportion of antibiotic prescriptions",
+    y = "Diagnostic category",
+    fill = "ATC category"
+  ) +
+  guides(fill = guide_legend(nrow = 3, byrow = TRUE)) +
+  theme_minimal(base_size = 36) +  # 基础字体更大
+  theme(
+    legend.position = "bottom",
+    legend.title = element_text(size = 16),
+    legend.text = element_text(size = 16),
+    legend.key.size = unit(0.5, "cm"),
+    legend.spacing.x = unit(0.4, "cm"),
+    legend.margin = margin(t = 5),
+    axis.text.x = element_text(size = 24),
+    axis.text.y = element_text(size = 24),
+    axis.title = element_text(size = 24),
+    plot.title = element_text(size = 36, face = "bold", hjust = 0.5),
+    panel.grid.major.y = element_blank()
+  )
+
+# Step 5: Save plot
+ggsave(
+  filename = "antibiotic_by_casetype.png",
+  plot = abx_plot,
+  width = 26,   # 宽度保持
+  height = 8,   # 高度增加，更适合大字体
+  dpi = 300
+)
+
+
+
+```
+
+
+```{r}
+
+library(tidyr)
+library(ggplot2)
+library(forcats)
+library(scales)
+
+# Step 0: Rename Chinese column names to English
+colnames(atc_case_wide) <- c(
+  "ATC",
+  "Migraine",
+  "Stress urinary incontinence",
+  "Asthma",
+  "Pediatric diarrhea",
+  "Angina",
+  "Common cold",
+  "Diabetes",
+  "Gastritis",
+  "Low back pain",
+  "Hypertension"
+)
+
+
+
+# Step 1: Data transformation
+abx_long <- atc_case_wide %>%
+  pivot_longer(-ATC, names_to = "case_type", values_to = "count") %>%
+  filter(count > 0)
+
+# Step 2: Proportion calculation
+abx_prop <- abx_long %>%
+  group_by(case_type) %>%
+  mutate(prop = count / sum(count)) %>%
+  ungroup()
+
+
+# Step 3: Custom color palette with J01CA04 fixed to #8B1A1A
+
+
+# 原始颜色（除去 #8B1A1A）
+colors <- c(
+'#00429d', '#2250a4', '#345faa', '#446db1', '#517cb7', '#5f8bbd', '#6c9bc3', '#7aaac9', '#88bacf', '#98c9d4', '#a9d9d9', '#bde7dd', '#d6f5e0', '#ffffe0', '#ffebd1', '#ffd7c2', '#ffc2b2', '#ffaca3', '#fe9694', '#f88186', '#ef6d79', '#e5596d', '#d94561', '#cb3256', '#bb1e4c', '#a80a42', '#93003a'
+)
+
+
+atc_list <- sort(unique(abx_prop$ATC))
+if (length(colors) != length(atc_list)) {
+  stop("颜色数量与 ATC 类别数量不一致！")
+}
+my_colors <- setNames(colors, atc_list)
+
+
+
+# Step 4: Plot (larger fonts)
+abx_plot <- ggplot(abx_prop, aes(x = prop, y = fct_rev(case_type), fill = ATC)) +
+  geom_bar(stat = "identity", position = "stack", width = 0.8) +
+  scale_x_continuous(labels = percent_format(accuracy = 1)) +
+  scale_fill_manual(values = my_colors) +
+  labs(
+    title = "Types of antibiotics prescribed for different diagnostic categories",
+    x = "Proportion of antibiotic prescriptions",
+    y = "Diagnostic category",
+    fill = "ATC category"
+  ) +
+  guides(fill = guide_legend(nrow = 3, byrow = TRUE)) +
+  theme_minimal(base_size = 36) +  # 基础字体更大
+  theme(
+    legend.position = "bottom",
+    legend.title = element_text(size = 16),
+    legend.text = element_text(size = 16),
+    legend.key.size = unit(0.5, "cm"),
+    legend.spacing.x = unit(0.4, "cm"),
+    legend.margin = margin(t = 5),
+    axis.text.x = element_text(size = 24),
+    axis.text.y = element_text(size = 24),
+    axis.title = element_text(size = 24),
+    plot.title = element_text(size = 36, face = "bold", hjust = 0.5),
+    panel.grid.major.y = element_blank()
+  )
+
+# Step 5: Save plot
+ggsave(
+  filename = "antibiotic_by_casetype.png",
+  plot = abx_plot,
+  width = 26,   # 宽度保持
+  height = 8,   # 高度增加，更适合大字体
+  dpi = 300
+)
+
+
+
+```
+
+
+```{r}
+
+
+table(mediation_clean$diagnosis_quality_clean, useNA = "ifany")
+str(mediation_clean$diagnosis_quality_clean)
+
+
+
+```
+
+
+
+# 黄华丹指导
+
+```{r}
+
+library(readr)
+library(lavaan)
+library(tidyverse)
+
+mediation_data <- read_csv("mediation_data.csv")
+
+
+
+
+
+# 构造一个新的数据框：mediation_clean，把变量都做成等级制
+mediation_clean <- mediation_data %>%
+  # 创建干净版的 diagnosis_quality 变量
+  mutate(
+    diagnosis_quality_clean = ifelse(
+      diagnosis_quality == "没有下诊断",
+      NA,
+      diagnosis_quality
+    ),
+    diagnosis_quality = factor(
+      diagnosis_quality_clean,
+      levels = c("错误", "部分正确", "完全正确"),
+      ordered = TRUE
+    ),
+    diagnosis_quality_num = as.numeric(diagnosis_quality)
+  )
+
+
+
+mediation_clean <- mediation_clean %>%
+  mutate(
+    management_type = factor(
+      management_type,
+      levels = c("非营利性", "营利性")  # 设置参考组为“非营利性”
+    )
+  )
+
+
+
+
+mediation_clean <- mediation_clean %>%
+  mutate(
+    case_type = factor(case_type)  # 转为因子即可
+  )
+
+mediation_clean <- mediation_clean %>%
+  mutate(
+    ownership_type = factor(ownership_type)
+  )
+
+
+mediation_clean <- mediation_clean %>%
+  mutate(
+    province = factor(province)
+  )
+
+mediation_clean <- mediation_clean %>%
+  mutate(
+    rural_type = factor(rural_type)
+  )
+
+mediation_clean <- mediation_clean %>%
+  mutate(
+    sp_gender = factor(sp_gender)
+  )
+
+
+mediation_clean <- mediation_clean %>%
+  mutate(
+    sp_age_group = factor(sp_age_group)
+  )
+
+
+mediation_clean <- mediation_clean %>%
+  mutate(
+    doctor_age = factor(doctor_age)
+  )
+
+
+mediation_clean <- mediation_clean %>%
+  mutate(
+    doctor_ethnic = factor(doctor_ethnic)
+  )
+
+
+mediation_clean <- mediation_clean %>%
+  mutate(
+    doctor_female = factor(doctor_female)
+  )
+
+
+# 将 sp_age_group 设置为有序因子
+mediation_clean$sp_age_group <- factor(
+  mediation_clean$sp_age_group,
+  levels = c("≤30", "30-49", "≥50"),
+  ordered = TRUE
+)
+
+# 将 doctor_age 设置为有序因子
+mediation_clean$doctor_age <- factor(
+  mediation_clean$doctor_age,
+  levels = c("<30", "30-50", "≥50"),
+  ordered = TRUE
+)
+
+
+
+
+
+```
+
+
+
+
+
+## 第一个M1 history_taking_ratio，M2是diagnosis_quality——跑出来发现多分类没法放入
+```{r}
+
+
+
+
+
+
+multipleMediation <- '
+  antibiotic_prescribed ~ case_type + doctor_female + management_type + ownership_type + province + rural_type + sp_gender + sp_age_group + doctor_age + doctor_ethnic + b1*history_taking_ratio + b2* diagnosis_quality_clean + c1*consultation_time
+  history_taking_ratio ~ case_type + doctor_female + management_type + ownership_type + province + rural_type + sp_gender + sp_age_group + doctor_age + doctor_ethnic + a1*consultation_time
+   diagnosis_quality_clean ~ case_type + doctor_female + management_type + ownership_type + province + rural_type + sp_gender + sp_age_group + doctor_age + doctor_ethnic + a2*consultation_time + d1*history_taking_ratio
+
+  Indirect1 := a1*b1
+  Indirect2 := a2*b2
+  secondInd1 := a1*d1*b2
+  c := c1 + a1*b1 + a2*b2 + a1*d1*b2
+'
+
+
+
+
+
+
+fit <- sem(model = multipleMediation,data = mediation_clean,se = "bootstrap",bootstrap = 5000)
+summary(fit,ci=T)
+
+
+
+
+
+```
+
+
+外生协变量时如何处理编码，比如`case_type`, `province`，`sp_age_group`,`doctor_age`等无序或者三等级制有序变量：
+
+如果是分类变量，建议拆成虚拟变量（dummy variables），防止lavaan因为多类别非序变量报错。
+
+例如：slide有3类，拆成slide_1、slide_2两个0/1变量（参考类不建变量）。
+
+
+
+
+## 第一个M1 history_taking_ratio，M2是diagnosis_quality——开始进行哑变量处理
+```{r}
+
+
+library(fastDummies)
+
+# 创建 dummy 变量（不保留原始变量，且去掉每个分类的参考组，避免共线性）
+mediation_clean_dummies <- fastDummies::dummy_cols(
+  mediation_clean,
+  select_columns = c("case_type", "province"),
+  remove_first_dummy = TRUE,
+  remove_selected_columns = TRUE
+)
+
+
+
+mediation_clean_dummies <- fastDummies::dummy_cols(
+  mediation_clean_dummies,
+  select_columns = c("sp_age_group", "doctor_age"),
+  remove_first_dummy = TRUE,      # 删除参考组，避免共线性
+  remove_selected_columns = TRUE  # 移除原始变量
+)
+
+
+mediation_clean_dummies <- dummy_cols(
+  mediation_clean_dummies, # 你之前已经包含其他 dummy 的数据
+  select_columns = "diagnosis_quality_clean",
+  remove_first_dummy = TRUE,   # 移除参考组，避免多重共线性
+  remove_selected_columns = TRUE  # 删除原变量
+)
+
+
+
+names(mediation_clean_dummies)[grepl("sp_age_group", names(mediation_clean_dummies))]
+names(mediation_clean_dummies)[grepl("doctor_age", names(mediation_clean_dummies))]
+names(mediation_clean_dummies)[grepl("diagnosis_quality_clean", names(mediation_clean_dummies))]
+
+
+
+
+
+case_type_dummies <- c(
+  "case_type_偏头痛",
+  "case_type_压力性尿失禁",
+  "case_type_哮喘",
+  "case_type_小儿腹泻",
+  "case_type_心绞痛",
+  "case_type_普通感冒",
+  "case_type_糖尿病",
+  "case_type_胃炎",
+  "case_type_腰背痛",
+  "case_type_高血压"
+)
+
+
+province_dummies <- c(
+  "province_Guangdong",
+  "province_Guizhou",
+  "province_Hunan",
+  "province_InnerMongolia",
+  "province_Shaanx",
+  "province_Sichuan"
+)
+
+
+
+
+multipleMediation <- '
+  antibiotic_prescribed ~
+      case_type_偏头痛 + case_type_压力性尿失禁 + case_type_哮喘 + case_type_小儿腹泻 + case_type_心绞痛 +
+      case_type_普通感冒 + case_type_糖尿病 + case_type_胃炎 + case_type_腰背痛 + case_type_高血压 +
+      province_Guangdong + province_Guizhou + province_Hunan + province_InnerMongolia + province_Shaanx + province_Sichuan +
+      doctor_female + management_type + ownership_type + rural_type + sp_gender +
+      `sp_age_group_30-49` + `sp_age_group_≥50` +
+      `doctor_age_30-50` + `doctor_age_≥50` +
+      doctor_ethnic +
+      b1*history_taking_ratio +
+      b2a*diagnosis_quality_clean_部分正确 +
+      b2b*diagnosis_quality_clean_错误 +
+      c1*consultation_time
+
+  history_taking_ratio ~
+      case_type_偏头痛 + case_type_压力性尿失禁 + case_type_哮喘 + case_type_小儿腹泻 + case_type_心绞痛 +
+      case_type_普通感冒 + case_type_糖尿病 + case_type_胃炎 + case_type_腰背痛 + case_type_高血压 +
+      province_Guangdong + province_Guizhou + province_Hunan + province_InnerMongolia + province_Shaanx + province_Sichuan +
+      doctor_female + management_type + ownership_type + rural_type + sp_gender +
+      `sp_age_group_30-49` + `sp_age_group_≥50` +
+      `doctor_age_30-50` + `doctor_age_≥50` +
+      doctor_ethnic +
+      a1*consultation_time
+
+  diagnosis_quality_clean_部分正确 ~
+      case_type_偏头痛 + case_type_压力性尿失禁 + case_type_哮喘 + case_type_小儿腹泻 + case_type_心绞痛 +
+      case_type_普通感冒 + case_type_糖尿病 + case_type_胃炎 + case_type_腰背痛 + case_type_高血压 +
+      province_Guangdong + province_Guizhou + province_Hunan + province_InnerMongolia + province_Shaanx + province_Sichuan +
+      doctor_female + management_type + ownership_type + rural_type + sp_gender +
+      `sp_age_group_30-49` + `sp_age_group_≥50` +
+      `doctor_age_30-50` + `doctor_age_≥50` +
+      doctor_ethnic +
+      a2a*consultation_time + d1a*history_taking_ratio
+
+  diagnosis_quality_clean_错误 ~
+      case_type_偏头痛 + case_type_压力性尿失禁 + case_type_哮喘 + case_type_小儿腹泻 + case_type_心绞痛 +
+      case_type_普通感冒 + case_type_糖尿病 + case_type_胃炎 + case_type_腰背痛 + case_type_高血压 +
+      province_Guangdong + province_Guizhou + province_Hunan + province_InnerMongolia + province_Shaanx + province_Sichuan +
+      doctor_female + management_type + ownership_type + rural_type + sp_gender +
+      `sp_age_group_30-49` + `sp_age_group_≥50` +
+      `doctor_age_30-50` + `doctor_age_≥50` +
+      doctor_ethnic +
+      a2b*consultation_time + d1b*history_taking_ratio
+
+  Indirect1 := a1*b1
+  Indirect2 := a2a*b2a
+  secondInd1 := a1*d1a*b2a
+  c := c1 + a1*b1 + a2a*b2a + a1*d1a*b2a
+'
+
+
+fit <- sem(model = multipleMediation,
+           data = mediation_clean_dummies,
+           se = "bootstrap",
+           bootstrap = 5000)
+
+summary(fit, ci = TRUE)
+
+
+
+
+```
+
+
+
+
+## 第二个M1 physical_exam_ratio，M2是diagnosis_quality——开始进行哑变量处理
+
+```{r}
+
+
+
+multipleMediation <- '
+  antibiotic_prescribed ~
+      case_type_偏头痛 + case_type_压力性尿失禁 + case_type_哮喘 + case_type_小儿腹泻 + case_type_心绞痛 +
+      case_type_普通感冒 + case_type_糖尿病 + case_type_胃炎 + case_type_腰背痛 + case_type_高血压 +
+      province_Guangdong + province_Guizhou + province_Hunan + province_InnerMongolia + province_Shaanx + province_Sichuan +
+      doctor_female + management_type + ownership_type + rural_type + sp_gender +
+      `sp_age_group_30-49` + `sp_age_group_≥50` +
+      `doctor_age_30-50` + `doctor_age_≥50` +
+      doctor_ethnic +
+      b1*physical_exam_ratio +
+      b2a*diagnosis_quality_clean_部分正确 +
+      b2b*diagnosis_quality_clean_错误 +
+      c1*consultation_time
+
+  physical_exam_ratio ~
+      case_type_偏头痛 + case_type_压力性尿失禁 + case_type_哮喘 + case_type_小儿腹泻 + case_type_心绞痛 +
+      case_type_普通感冒 + case_type_糖尿病 + case_type_胃炎 + case_type_腰背痛 + case_type_高血压 +
+      province_Guangdong + province_Guizhou + province_Hunan + province_InnerMongolia + province_Shaanx + province_Sichuan +
+      doctor_female + management_type + ownership_type + rural_type + sp_gender +
+      `sp_age_group_30-49` + `sp_age_group_≥50` +
+      `doctor_age_30-50` + `doctor_age_≥50` +
+      doctor_ethnic +
+      a1*consultation_time
+
+  diagnosis_quality_clean_部分正确 ~
+      case_type_偏头痛 + case_type_压力性尿失禁 + case_type_哮喘 + case_type_小儿腹泻 + case_type_心绞痛 +
+      case_type_普通感冒 + case_type_糖尿病 + case_type_胃炎 + case_type_腰背痛 + case_type_高血压 +
+      province_Guangdong + province_Guizhou + province_Hunan + province_InnerMongolia + province_Shaanx + province_Sichuan +
+      doctor_female + management_type + ownership_type + rural_type + sp_gender +
+      `sp_age_group_30-49` + `sp_age_group_≥50` +
+      `doctor_age_30-50` + `doctor_age_≥50` +
+      doctor_ethnic +
+      a2a*consultation_time + d1a*physical_exam_ratio
+
+  diagnosis_quality_clean_错误 ~
+      case_type_偏头痛 + case_type_压力性尿失禁 + case_type_哮喘 + case_type_小儿腹泻 + case_type_心绞痛 +
+      case_type_普通感冒 + case_type_糖尿病 + case_type_胃炎 + case_type_腰背痛 + case_type_高血压 +
+      province_Guangdong + province_Guizhou + province_Hunan + province_InnerMongolia + province_Shaanx + province_Sichuan +
+      doctor_female + management_type + ownership_type + rural_type + sp_gender +
+      `sp_age_group_30-49` + `sp_age_group_≥50` +
+      `doctor_age_30-50` + `doctor_age_≥50` +
+      doctor_ethnic +
+      a2b*consultation_time + d1b*physical_exam_ratio
+
+  Indirect1 := a1*b1
+  Indirect2 := a2a*b2a
+  secondInd1 := a1*d1a*b2a
+  c := c1 + a1*b1 + a2a*b2a + a1*d1a*b2a
+'
+
+# 拟合模型
+fit <- sem(model = multipleMediation,
+           data = mediation_clean_dummies,
+           se = "bootstrap",
+           bootstrap = 5000)
+
+# 输出摘要（包含置信区间）
+summary(fit, ci = TRUE)
+
+
+
+```
+
+
+
+## 第三个M1 lab_imaging_ratio，M2是diagnosis_quality——开始进行哑变量处理
+
+```{r}
+
+
+
+multipleMediation <- '
+  antibiotic_prescribed ~
+      case_type_偏头痛 + case_type_压力性尿失禁 + case_type_哮喘 + case_type_小儿腹泻 + case_type_心绞痛 +
+      case_type_普通感冒 + case_type_糖尿病 + case_type_胃炎 + case_type_腰背痛 + case_type_高血压 +
+      province_Guangdong + province_Guizhou + province_Hunan + province_InnerMongolia + province_Shaanx + province_Sichuan +
+      doctor_female + management_type + ownership_type + rural_type + sp_gender +
+      `sp_age_group_30-49` + `sp_age_group_≥50` +
+      `doctor_age_30-50` + `doctor_age_≥50` +
+      doctor_ethnic +
+      b1*lab_imaging_ratio +
+      b2a*diagnosis_quality_clean_部分正确 +
+      b2b*diagnosis_quality_clean_错误 +
+      c1*consultation_time
+
+  lab_imaging_ratio ~
+      case_type_偏头痛 + case_type_压力性尿失禁 + case_type_哮喘 + case_type_小儿腹泻 + case_type_心绞痛 +
+      case_type_普通感冒 + case_type_糖尿病 + case_type_胃炎 + case_type_腰背痛 + case_type_高血压 +
+      province_Guangdong + province_Guizhou + province_Hunan + province_InnerMongolia + province_Shaanx + province_Sichuan +
+      doctor_female + management_type + ownership_type + rural_type + sp_gender +
+      `sp_age_group_30-49` + `sp_age_group_≥50` +
+      `doctor_age_30-50` + `doctor_age_≥50` +
+      doctor_ethnic +
+      a1*consultation_time
+
+  diagnosis_quality_clean_部分正确 ~
+      case_type_偏头痛 + case_type_压力性尿失禁 + case_type_哮喘 + case_type_小儿腹泻 + case_type_心绞痛 +
+      case_type_普通感冒 + case_type_糖尿病 + case_type_胃炎 + case_type_腰背痛 + case_type_高血压 +
+      province_Guangdong + province_Guizhou + province_Hunan + province_InnerMongolia + province_Shaanx + province_Sichuan +
+      doctor_female + management_type + ownership_type + rural_type + sp_gender +
+      `sp_age_group_30-49` + `sp_age_group_≥50` +
+      `doctor_age_30-50` + `doctor_age_≥50` +
+      doctor_ethnic +
+      a2a*consultation_time + d1a*lab_imaging_ratio
+
+  diagnosis_quality_clean_错误 ~
+      case_type_偏头痛 + case_type_压力性尿失禁 + case_type_哮喘 + case_type_小儿腹泻 + case_type_心绞痛 +
+      case_type_普通感冒 + case_type_糖尿病 + case_type_胃炎 + case_type_腰背痛 + case_type_高血压 +
+      province_Guangdong + province_Guizhou + province_Hunan + province_InnerMongolia + province_Shaanx + province_Sichuan +
+      doctor_female + management_type + ownership_type + rural_type + sp_gender +
+      `sp_age_group_30-49` + `sp_age_group_≥50` +
+      `doctor_age_30-50` + `doctor_age_≥50` +
+      doctor_ethnic +
+      a2b*consultation_time + d1b*lab_imaging_ratio
+
+  Indirect1 := a1*b1
+  Indirect2 := a2a*b2a
+  secondInd1 := a1*d1a*b2a
+  c := c1 + a1*b1 + a2a*b2a + a1*d1a*b2a
+'
+
+
+# 拟合模型
+fit <- sem(model = multipleMediation,
+           data = mediation_clean_dummies,
+           se = "bootstrap",
+           bootstrap = 5000)
+
+# 输出摘要（包含置信区间）
+summary(fit, ci = TRUE)
+
+
+
+
+
+```
+
+
+
+
+## 第四个M1 diagnosis_quality——单一中介
+
+```{r}
+
+simpleMediation <- '
+  # 路径：consultation_time -> diagnosis_quality -> antibiotic_prescribed
+  antibiotic_prescribed ~
+      b2a*diagnosis_quality_clean_部分正确 +
+      b2b*diagnosis_quality_clean_错误 +
+      c1*consultation_time +
+      case_type_偏头痛 + case_type_压力性尿失禁 + case_type_哮喘 + case_type_小儿腹泻 + case_type_心绞痛 +
+      case_type_普通感冒 + case_type_糖尿病 + case_type_胃炎 + case_type_腰背痛 + case_type_高血压 +
+      province_Guangdong + province_Guizhou + province_Hunan + province_InnerMongolia + province_Shaanx + province_Sichuan +
+      doctor_female + management_type + ownership_type + rural_type + sp_gender +
+      `sp_age_group_30-49` + `sp_age_group_≥50` +
+      `doctor_age_30-50` + `doctor_age_≥50` +
+      doctor_ethnic
+
+  # 中介方程
+  diagnosis_quality_clean_部分正确 ~ a2a*consultation_time +
+      case_type_偏头痛 + case_type_压力性尿失禁 + case_type_哮喘 + case_type_小儿腹泻 + case_type_心绞痛 +
+      case_type_普通感冒 + case_type_糖尿病 + case_type_胃炎 + case_type_腰背痛 + case_type_高血压 +
+      province_Guangdong + province_Guizhou + province_Hunan + province_InnerMongolia + province_Shaanx + province_Sichuan +
+      doctor_female + management_type + ownership_type + rural_type + sp_gender +
+      `sp_age_group_30-49` + `sp_age_group_≥50` +
+      `doctor_age_30-50` + `doctor_age_≥50` +
+      doctor_ethnic
+
+  diagnosis_quality_clean_错误 ~ a2b*consultation_time +
+      case_type_偏头痛 + case_type_压力性尿失禁 + case_type_哮喘 + case_type_小儿腹泻 + case_type_心绞痛 +
+      case_type_普通感冒 + case_type_糖尿病 + case_type_胃炎 + case_type_腰背痛 + case_type_高血压 +
+      province_Guangdong + province_Guizhou + province_Hunan + province_InnerMongolia + province_Shaanx + province_Sichuan +
+      doctor_female + management_type + ownership_type + rural_type + sp_gender +
+      `sp_age_group_30-49` + `sp_age_group_≥50` +
+      `doctor_age_30-50` + `doctor_age_≥50` +
+      doctor_ethnic
+
+  # 间接效应定义
+  Indirect2a := a2a * b2a
+  Indirect2b := a2b * b2b
+  Total_Indirect := Indirect2a + Indirect2b
+  Total_Effect := c1 + Total_Indirect
+'
+
+# 拟合模型
+fit <- sem(model = multipleMediation,
+           data = mediation_clean_dummies,
+           se = "bootstrap",
+           bootstrap = 5000)
+
+# 输出摘要（包含置信区间）
+summary(fit, ci = TRUE)
+
+
+
+
+```
+
+
+
+
+
+## 徐老师让补充的分析
+```{r}
+
+
+library(dplyr)
+library(broom)
+
+# 计算每类的统计量
+result <- formal_data_final_modeimputed %>%
+  group_by(institution_type_houyu) %>%
+  summarise(
+    n_visits = n(),
+    n_antibiotic = sum(antibiotic_prescribed == 1, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    total_visits = sum(n_visits),
+    all_visits_percent = paste0(n_visits, " (", round(n_visits / total_visits * 100, 2), "%)")
+  )
+
+# 计算处方率和95%CI
+rate_ci <- result %>%
+  rowwise() %>%
+  mutate(
+    ci = list(binom.test(n_antibiotic, n_visits)$conf.int),
+    rate = n_antibiotic / n_visits * 100
+  ) %>%
+  mutate(
+    ci_low = round(ci[[1]] * 100, 2),
+    ci_high = round(ci[[2]] * 100, 2),
+    antibiotic_rate = paste0(round(rate, 2), "% (", ci_low, "–", ci_high, "%)")
+  ) %>%
+  select(institution_type_houyu, all_visits_percent, n_antibiotic, antibiotic_rate)
+
+print(rate_ci)
+
+
+
+
+```
+
+
+
+
+```{r}
+
+library(dplyr)
+
+# 总样本数
+total_n <- nrow(formal_data_final_modeimputed)
+
+result <- formal_data_final_modeimputed %>%
+  group_by(case_type, institution_type_houyu) %>%
+  summarise(
+    n = n(),
+    antibiotic_yes = sum(antibiotic_prescribed == 1, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  rowwise() %>%
+  mutate(
+    # 就诊次数占比
+    all_visits_percent = round(100 * n / total_n, 2),
+
+    # 抗生素处方率
+    prescription_rate = antibiotic_yes / n,
+
+    # 计算 95% CI (用 binom.test)
+    ci = list(binom.test(antibiotic_yes, n)$conf.int)
+  ) %>%
+  mutate(
+    ci_low = round(ci[[1]] * 100, 2),
+    ci_high = round(ci[[2]] * 100, 2),
+    prescription_rate_percent = round(prescription_rate * 100, 2),
+    prescription_rate_ci = paste0(prescription_rate_percent, "% (", ci_low, "–", ci_high, "%)")
+  ) %>%
+  ungroup() %>%
+  select(
+    case_type,
+    institution_type_houyu,
+    `All visits (%)` = all_visits_percent,
+    `Antibiotic prescriptions` = antibiotic_yes,
+    `Antibiotic prescription rate (95% CI)` = prescription_rate_ci
+  )
+
+
+
+
+# 保存为 CSV
+write.csv(result, "antibiotic_prescription_rate.csv", row.names = FALSE)
+
+
+
+
+```
+
+
+
+
+```{r}
+
+
+
+library(dplyr)
+
+# 总样本数
+total_n <- nrow(formal_data_final_modeimputed)
+
+result <- formal_data_final_modeimputed %>%
+  mutate(
+    institution_type_grouped = case_when(
+      institution_type_houyu %in% c("乡镇卫生院", "村卫生室") ~ "乡镇卫生院/村卫生室",
+      TRUE ~ institution_type_houyu
+    )
+  ) %>%
+  group_by(case_type, institution_type_grouped) %>%
+  summarise(
+    n = n(),
+    antibiotic_yes = sum(antibiotic_prescribed == 1, na.rm = TRUE),
+    .groups = "drop"
+  ) %>%
+  rowwise() %>%
+  mutate(
+    # 就诊次数占比
+    all_visits_percent = round(100 * n / total_n, 2),
+
+    # 抗生素处方率
+    prescription_rate = antibiotic_yes / n,
+
+    # 计算 95% CI (binom.test)
+    ci = list(binom.test(antibiotic_yes, n)$conf.int)
+  ) %>%
+  mutate(
+    ci_low = round(ci[[1]] * 100, 2),
+    ci_high = round(ci[[2]] * 100, 2),
+    prescription_rate_percent = round(prescription_rate * 100, 2),
+    prescription_rate_ci = paste0(prescription_rate_percent, "% (", ci_low, "–", ci_high, "%)")
+  ) %>%
+  ungroup() %>%
+  select(
+    case_type,
+    institution_type = institution_type_grouped,
+    `All visits (%)` = all_visits_percent,
+    `Antibiotic prescriptions` = antibiotic_yes,
+    `Antibiotic prescription rate (95% CI)` = prescription_rate_ci
+  )
+
+# 保存为 CSV
+write.csv(result, "antibiotic_prescription_rate-combine.csv", row.names = FALSE)
+
+
+
+
+
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
